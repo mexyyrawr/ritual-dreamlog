@@ -91,7 +91,7 @@ export default function Home() {
       log("Encoding LLM call...");
       const encoded = encodeAbiParameters(
         parseAbiParameters(["address, bytes[], uint256, bytes[], bytes,", "string, string, int256, string, bool, int256, string, string,", "uint256, bool, int256, string, bytes, int256, string, string, bool,", "int256, bytes, bytes, int256, int256, string, bool,", "(string,string,string)"].join("")),
-        ["0x0000000000000000000000000000000000000000" as `0x${string}`, [], 300n, [], "0x" as Hex, msg, "zai-org/GLM-4.7-FP8", 0n, "", false, 4096n, "", "", 1n, true, 0n, "medium", "0x" as Hex, -1n, "auto", "", false, 700n, "0x" as Hex, "0x" as Hex, -1n, 1000n, "", false, ["", "", ""]]
+        [address as `0x${string}`, [], 300n, [], "0x" as Hex, msg, "zai-org/GLM-4.7-FP8", 0n, "", false, 4096n, "", "", 1n, true, 0n, "medium", "0x" as Hex, -1n, "auto", "", false, 700n, "0x" as Hex, "0x" as Hex, -1n, 1000n, "", false, ["", "", ""]]
       );
 
       log(`Sending to precompile (${encoded.length / 2} bytes)...`);
