@@ -3,8 +3,6 @@ pragma solidity ^0.8.20;
 
 import {PrecompileConsumer} from "./utils/PrecompileConsumer.sol";
 
-/// @title Ritual Dreamlog
-/// @notice On-chain dream journal with LLM-powered interpretation via Ritual precompile
 contract Dreamlog is PrecompileConsumer {
     address constant RITUAL_WALLET = 0x532F0dF0896F353d8C3DD8cc134e8129DA2a3948;
 
@@ -18,8 +16,6 @@ contract Dreamlog is PrecompileConsumer {
         string emotion;
         string language;
         uint256 timestamp;
-        uint256 parentDreamId;
-        bool minted;
         bool interpreted;
     }
 
@@ -31,18 +27,14 @@ contract Dreamlog is PrecompileConsumer {
     event DreamInterpreted(uint256 indexed dreamId, string mood, string archetype);
 
     /// @notice Deposit RITUAL to RitualWallet for LLM fees
-    /// @dev Users send RIT here, contract deposits to RitualWallet with long lock
     function depositForFees() external payable {
         (bool ok,) = RITUAL_WALLET.call{value: msg.value}(
-            abi.encodeWithSignature("deposit(uint256)", 100000) // 100000 blocks ≈ 10 hours
+            abi.encodeWithSignature("deposit(uint256)", 100000)
         );
         require(ok, "Deposit to RitualWallet failed");
     }
 
     /// @notice Submit a dream to the journal
-    /// @param dreamText The dream description
-    /// @param language The language code (id, en, ja, etc.)
-    /// @return dreamId The assigned dream ID
     function submitDream(string calldata dreamText, string calldata language) external returns (uint256 dreamId) {
         dreamId = nextDreamId++;
         dreams[dreamId] = Dream({
@@ -55,8 +47,6 @@ contract Dreamlog is PrecompileConsumer {
             emotion: "",
             language: language,
             timestamp: block.timestamp,
-            parentDreamId: 0,
-            minted: false,
             interpreted: false
         });
         dreamerDreams[msg.sender].push(dreamId);
@@ -64,58 +54,51 @@ contract Dreamlog is PrecompileConsumer {
     }
 
     /// @notice Call the LLM precompile to interpret a dream
-    /// @param dreamId The dream to interpret
-    /// @param llmInput The pre-encoded LLM request (25-field ABI from frontend)
-    function interpretDream(uint256 dreamId, bytes calldata llmInput) external {
+    function interpretDream(uint256 dreamId, bytes calldata llmInput) external payable {
         require(dreams[dreamId].dreamer == msg.sender, "not your dream");
         require(!dreams[dreamId].interpreted, "already interpreted");
 
+        // Deposit to RitualWallet first if value is sent
+        if (msg.value > 0) {
+            (bool depositOk,) = RITUAL_WALLET.call{value: msg.value}(
+                abi.encodeWithSignature("deposit(uint256)", 100000)
+            );
+            require(depositOk, "Deposit to RitualWallet failed");
+        }
+
         bytes memory output = _executePrecompile(LLM_INFERENCE_PRECOMPILE, llmInput);
 
-        // Decode: (bool hasError, bytes completionData, bytes modelMetadata, string errorMessage, (string,string,string) convoHistory)
-        (
-            bool hasError,
-            bytes memory completionData,
-            ,
-            string memory errorMessage,
-        ) = abi.decode(output, (bool, bytes, bytes, string, string[3]));
+        (bool hasError, bytes memory completionData, , string memory errorMessage) =
+            abi.decode(output, (bool, bytes, bytes, string));
 
         require(!hasError, errorMessage);
 
-        // Parse completionData as JSON string
         string memory interpretation = _bytesToString(completionData);
         dreams[dreamId].interpretation = interpretation;
         dreams[dreamId].interpreted = true;
 
-        // Emit with default mood (frontend will parse actual mood from JSON)
         emit DreamInterpreted(dreamId, "mystical", "unknown");
     }
 
-    /// @notice Store interpretation result (called by frontend after parsing)
-    /// @param dreamId The dream ID
-    /// @param interpretation The interpretation text
+    /// @notice Store interpretation result
     function storeResult(uint256 dreamId, string calldata interpretation) external {
         require(dreams[dreamId].dreamer == msg.sender, "not your dream");
         dreams[dreamId].interpretation = interpretation;
         dreams[dreamId].interpreted = true;
     }
 
-    /// @notice Get a dream by ID
     function getDream(uint256 dreamId) external view returns (Dream memory) {
         return dreams[dreamId];
     }
 
-    /// @notice Get all dream IDs for an address
     function getDreamsByAddress(address dreamer) external view returns (uint256[] memory) {
         return dreamerDreams[dreamer];
     }
 
-    /// @notice Get total number of dreams
     function getTotalDreams() external view returns (uint256) {
         return nextDreamId;
     }
 
-    /// @dev Convert bytes to string
     function _bytesToString(bytes memory data) internal pure returns (string memory) {
         bytes memory result = new bytes(data.length);
         for (uint256 i = 0; i < data.length; i++) {

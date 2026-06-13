@@ -136,12 +136,13 @@ export default function Home() {
       const llmInput = encodeLLMRequest();
       log(`Encoded: ${llmInput.length / 2} bytes`);
 
-      log("Step 2: Calling contract.interpretDream()...");
+      log("Step 2: Calling contract.interpretDream() with 0.5 RIT deposit...");
       writeContract({
         address: CONTRACT_ADDRESS,
         abi: CONTRACT_ABI,
         functionName: "interpretDream",
-        args: [BigInt(dreamId ?? 0), llmInput]
+        args: [BigInt(dreamId ?? 0), llmInput],
+        value: BigInt("500000000000000000") // 0.5 RIT - deposit + LLM call in one TX
       }, {
         onSuccess: () => { log("✅ interpretDream TX sent! LLM processing on-chain..."); setStatus("storing"); },
         onError: (error) => { setStatus("error"); setErrorMessage(`LLM: ${error.message}`); log(`Error: ${error.message}`); },
