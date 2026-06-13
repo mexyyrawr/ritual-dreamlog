@@ -31,10 +31,10 @@ contract Dreamlog is PrecompileConsumer {
     event DreamInterpreted(uint256 indexed dreamId, string mood, string archetype);
 
     /// @notice Deposit RITUAL to RitualWallet for LLM fees
-    /// @dev Users send RIT here, contract deposits to RitualWallet with lock
+    /// @dev Users send RIT here, contract deposits to RitualWallet with long lock
     function depositForFees() external payable {
         (bool ok,) = RITUAL_WALLET.call{value: msg.value}(
-            abi.encodeWithSignature("deposit(uint256)", 5000)
+            abi.encodeWithSignature("deposit(uint256)", 100000) // 100000 blocks ≈ 10 hours
         );
         require(ok, "Deposit to RitualWallet failed");
     }
