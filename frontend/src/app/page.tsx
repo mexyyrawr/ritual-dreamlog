@@ -79,6 +79,7 @@ export default function Home() {
   };
 
   const callLLMPrecompile = async () => {
+    let llmTxHash: string | undefined;
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const ethereum = (window as any).ethereum;
@@ -94,8 +95,14 @@ export default function Home() {
       );
 
       log(`Sending to precompile (${encoded.length / 2} bytes)...`);
-      const llmTxHash = await ethereum.request({ method: "eth_sendTransaction", params: [{ from: address, to: LLM_PRECOMPILE, data: encoded, gas: "0x2DC6C0" }] });
-      log(`LLM TX: ${llmTxHash}`);
+      try {
+        llmTxHash = await ethereum.request({ method: "eth_sendTransaction", params: [{ from: address, to: LLM_PRECOMPILE, data: encoded, gas: "0x4C4B40" }] });
+        log(`LLM TX: ${llmTxHash}`);
+      } catch (sendErr: unknown) {
+        const sendMsg = sendErr instanceof Error ? sendErr.message : JSON.stringify(sendErr);
+        log(`Send failed: ${sendMsg}`);
+        throw new Error(`eth_sendTransaction failed: ${sendMsg}`);
+      }
 
       // Wait for receipt
       const receipt: AnyReceipt = await waitForReceipt(llmTxHash);
