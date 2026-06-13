@@ -21,9 +21,6 @@ contract RitualDreamlog is ERC721, Ownable {
     /// @dev RitualWallet for fee deposits
     address constant RITUAL_WALLET = 0x532F0dF0896F353d8C3DD8cc134e8129DA2a3948;
 
-    /// @dev AsyncDelivery proxy — msg.sender for all async callbacks
-    address constant ASYNC_DELIVERY = 0x5A16214fF555848411544b005f7Ac063742f39F6;
-
     /// @dev LLM model to use
     string constant MODEL = "zai-org/GLM-4.7-FP8";
 
@@ -38,11 +35,10 @@ contract RitualDreamlog is ERC721, Ownable {
         uint256 id;
         address dreamer;
         string dreamText;
-        string[] symbols;
-        string emotion;
-        string archetype;
         string interpretation;
         string mood;
+        string archetype;
+        string emotion;
         string language;
         uint256 timestamp;
         uint256 parentDreamId;  // 0 = standalone
@@ -63,6 +59,7 @@ contract RitualDreamlog is ERC721, Ownable {
     event DreamInterpreted(uint256 indexed dreamId, string mood, string archetype);
     event DreamChained(uint256 indexed dreamId, uint256 indexed parentDreamId);
     event DreamMinted(uint256 indexed dreamId, uint256 indexed tokenId, address dreamer);
+    event DebugLLM(string message);
 
     // ============================================================
     // ERRORS
@@ -114,52 +111,45 @@ contract RitualDreamlog is ERC721, Ownable {
 
         emit DreamSubmitted(dreamId, msg.sender, language);
 
-        // Build LLM prompt
-        string memory systemPrompt = string(
-            "You are a dream interpreter. Analyze the given dream and return a JSON object with: "
-            "\"symbols\" (array of key symbols, max 5), "
-            "\"emotion\" (primary emotions detected, e.g., \"Curiosity\" or \"Fear\"), "
-            "\"archetype\" (Jungian archetype, e.g., \"The Seeker\"), "
-            "\"interpretation\" (2-3 sentence English interpretation), "
-            "\"mood\" (one of: mystical, dark, zen, wonder, horror, confused). "
-            "Return ONLY valid JSON, no markdown formatting."
-        );
+        // Build messages JSON — simple format, no response_format
+        string memory messagesJson = _buildMessages(dreamText);
 
-        string memory messagesJson = _buildMessages(systemPrompt, dreamText);
-
-        // Call LLM Precompile (short-running async)
+        // Call LLM Precompile — EXACT 30-field format from Ritual skill
+        // Using empty bytes for responseFormatData (no structured output)
         bytes memory input = abi.encode(
-            address(0),             // executor (address(0) = let chain pick)
-            new bytes[](0),         // encryptedSecrets
-            uint256(DEFAULT_TTL),   // ttl
-            new bytes[](0),         // secretSignatures
-            bytes(""),              // userPublicKey
-            messagesJson,           // messagesJson
-            MODEL,                  // model
-            int256(0),              // frequencyPenalty
-            "",                     // logitBiasJson
-            false,                  // logprobs
-            int256(4096),           // maxCompletionTokens (>=4096 for GLM-4.7-FP8)
-            "",                     // metadataJson
-            "",                     // modalitiesJson
-            uint256(1),             // n
-            true,                   // parallelToolCalls
-            int256(0),              // presencePenalty
-            "medium",               // reasoningEffort
-            _buildResponseFormat(), // responseFormatData
-            int256(-1),             // seed
-            "auto",                 // serviceTier
-            "",                     // stopJson
-            false,                  // stream
-            int256(700),            // temperature (0.7)
-            bytes(""),              // toolChoiceData
-            bytes(""),              // toolsData
-            int256(-1),             // topLogprobs
-            int256(1000),           // topP (1.0)
-            "",                     // user
-            false,                  // piiEnabled
-            abi.encode("", "", "")  // convoHistory (no history needed)
+            address(0),             // 1. executor (address(0) = let chain pick)
+            new bytes[](0),         // 2. encryptedSecrets
+            uint256(DEFAULT_TTL),   // 3. ttl
+            new bytes[](0),         // 4. secretSignatures
+            bytes(""),              // 5. userPublicKey
+            messagesJson,           // 6. messagesJson
+            MODEL,                  // 7. model
+            int256(0),              // 8. frequencyPenalty
+            "",                     // 9. logitBiasJson
+            false,                  // 10. logprobs
+            int256(4096),           // 11. maxCompletionTokens (>=4096 for GLM-4.7-FP8)
+            "",                     // 12. metadataJson
+            "",                     // 13. modalitiesJson
+            uint256(1),             // 14. n
+            true,                   // 15. parallelToolCalls
+            int256(0),              // 16. presencePenalty
+            "medium",               // 17. reasoningEffort
+            bytes(""),              // 18. responseFormatData (EMPTY — no structured output)
+            int256(-1),             // 19. seed (null)
+            "auto",                 // 20. serviceTier
+            "",                     // 21. stopJson
+            false,                  // 22. stream
+            int256(700),            // 23. temperature (0.7)
+            bytes(""),              // 24. toolChoiceData
+            bytes(""),              // 25. toolsData
+            int256(-1),             // 26. topLogprobs (null)
+            int256(1000),           // 27. topP (1.0)
+            "",                     // 28. user
+            false,                  // 29. piiEnabled
+            abi.encode("", "", "")  // 30. convoHistory (empty StorageRef — no history)
         );
+
+        emit DebugLLM("Calling LLM precompile...");
 
         (bool success, bytes memory result) = LLM_PRECOMPILE.call(input);
         if (!success) revert PrecompileFailed();
@@ -167,15 +157,13 @@ contract RitualDreamlog is ERC721, Ownable {
         // Unwrap async envelope: (bytes simmedInput, bytes actualOutput)
         (, bytes memory actualOutput) = abi.decode(result, (bytes, bytes));
 
-        // Decode LLM response
-        // Response: (bool hasError, bytes completionData, bytes modelMetadata, string errorMessage, (string,string,string) updatedConvoHistory)
-        // We use a simplified decode since Solidity doesn't support inline tuples in abi.decode
+        // Decode LLM response — first 4 fields (skip updatedConvoHistory tuple at end)
         (
             bool hasError,
             bytes memory completionData,
             ,
             string memory errorMessage
-        ) = _decodeLLMResponse(actualOutput);
+        ) = abi.decode(actualOutput, (bool, bytes, bytes, string));
 
         if (hasError) revert LLMInferenceFailed(errorMessage);
 
@@ -187,8 +175,6 @@ contract RitualDreamlog is ERC721, Ownable {
 
     /**
      * @notice Chain a dream to a parent dream (storyline)
-     * @param dreamId The dream to chain
-     * @param parentDreamId The parent dream
      */
     function chainDream(uint256 dreamId, uint256 parentDreamId) external {
         Dream storage dream = dreams[dreamId];
@@ -204,8 +190,6 @@ contract RitualDreamlog is ERC721, Ownable {
 
     /**
      * @notice Mint a dream card as an NFT
-     * @param dreamId The dream to mint
-     * @return tokenId The minted token ID
      */
     function mintDreamCard(uint256 dreamId) external returns (uint256 tokenId) {
         Dream storage dream = dreams[dreamId];
@@ -239,7 +223,6 @@ contract RitualDreamlog is ERC721, Ownable {
     }
 
     function tokenURI(uint256 tokenId) public pure override returns (string memory) {
-        // TODO: Generate metadata URI for NFT
         return string(abi.encodePacked("ipfs://dreamlog/", _uint2str(tokenId)));
     }
 
@@ -262,56 +245,25 @@ contract RitualDreamlog is ERC721, Ownable {
     // ============================================================
 
     /**
-     * @dev Decode LLM precompile response
-     * @dev Response structure: (bool hasError, bytes completionData, bytes modelMetadata, string errorMessage, (string,string,string) updatedConvoHistory)
-     * @dev We decode manually because Solidity doesn't support inline tuple types in abi.decode
-     */
-    function _decodeLLMResponse(bytes memory data) internal pure returns (
-        bool hasError,
-        bytes memory completionData,
-        bytes memory modelMetadata,
-        string memory errorMessage
-    ) {
-        // The response is ABI-encoded with a tuple at the end
-        // We decode the first 4 fields manually
-        (hasError, completionData, modelMetadata, errorMessage) = 
-            abi.decode(data, (bool, bytes, bytes, string));
-    }
-
-    /**
      * @dev Build OpenAI-style messages JSON
+     * @dev System prompt instructs LLM to return JSON with mood/archetype/emotion/interpretation
      */
     function _buildMessages(
-        string memory systemPrompt,
-        string memory userPrompt
+        string memory dreamText
     ) internal pure returns (string memory) {
+        string memory systemPrompt = "You are a dream interpreter. Analyze the dream and reply with ONLY a JSON object: {\"symbols\":[\"sym1\",\"sym2\"],\"emotion\":\"primary emotion\",\"archetype\":\"Jungian archetype\",\"interpretation\":\"2-3 sentence interpretation\",\"mood\":\"one of: mystical, dark, zen, wonder, horror, confused\"}. No markdown, no extra text, just the JSON object.";
+
         return string(
             abi.encodePacked(
                 '[{"role":"system","content":"', _escapeJson(systemPrompt), '"},',
-                '{"role":"user","content":"', _escapeJson(userPrompt), '"}]'
+                '{"role":"user","content":"', _escapeJson(dreamText), '"}]'
             )
         );
     }
 
     /**
-     * @dev Build response_format for structured JSON output
-     */
-    function _buildResponseFormat() internal pure returns (bytes memory) {
-        // JsonSchema inner: (name, description, schemaJson, strict)
-        bytes memory jsonSchemaData = abi.encode(
-            "dream_interpretation",
-            "Dream analysis result",
-            '{"type":"object","properties":{"symbols":{"type":"array","items":{"type":"string"},"maxItems":5},"emotion":{"type":"string"},"archetype":{"type":"string"},"interpretation":{"type":"string"},"mood":{"type":"string","enum":["mystical","dark","zen","wonder","horror","confused"]}},"required":["symbols","emotion","archetype","interpretation","mood"]}',
-            "true"
-        );
-
-        // ResponseFormat outer: (type, jsonSchemaData)
-        return abi.encode("json_schema", jsonSchemaData);
-    }
-
-    /**
      * @dev Parse LLM completion data and store interpretation
-     * @dev completionData is ABI-encoded CompletionData, not raw JSON
+     * @dev completionData is ABI-encoded CompletionData
      */
     function _parseAndStoreInterpretation(
         uint256 dreamId,
@@ -329,6 +281,10 @@ contract RitualDreamlog is ERC721, Ownable {
         if (choicesCount == 0 || choicesData.length == 0) {
             // Fallback if no choices
             dream.interpreted = true;
+            dream.interpretation = "No interpretation available";
+            dream.mood = "mystical";
+            dream.archetype = "The Dreamer";
+            dream.emotion = "Unknown";
             return;
         }
 
@@ -340,43 +296,32 @@ contract RitualDreamlog is ERC721, Ownable {
         (, string memory content, , , ) =
             abi.decode(messageData, (string, string, string, uint256, bytes[]));
 
-        // Parse the JSON content to extract fields
-        // Since we can't do full JSON parsing on-chain easily,
-        // we store the raw content and parse it via events/frontend
-        // The structured output should be clean JSON
-
-        // For now, store the raw interpretation and mark as interpreted
+        // Store the raw interpretation
         dream.interpretation = content;
         dream.interpreted = true;
 
-        // Try to extract mood from the JSON (simple string matching)
-        // This is a best-effort approach — the frontend will do proper parsing
-        if (_contains(content, "\"mood\":\"mystical\"")) dream.mood = "mystical";
-        else if (_contains(content, "\"mood\":\"dark\"")) dream.mood = "dark";
-        else if (_contains(content, "\"mood\":\"zen\"")) dream.mood = "zen";
-        else if (_contains(content, "\"mood\":\"wonder\"")) dream.mood = "wonder";
-        else if (_contains(content, "\"mood\":\"horror\"")) dream.mood = "horror";
-        else if (_contains(content, "\"mood\":\"confused\"")) dream.mood = "confused";
+        // Extract fields from JSON content (best-effort string matching)
+        if (_contains(content, '"mood":"mystical"')) dream.mood = "mystical";
+        else if (_contains(content, '"mood":"dark"')) dream.mood = "dark";
+        else if (_contains(content, '"mood":"zen"')) dream.mood = "zen";
+        else if (_contains(content, '"mood":"wonder"')) dream.mood = "wonder";
+        else if (_contains(content, '"mood":"horror"')) dream.mood = "horror";
+        else if (_contains(content, '"mood":"confused"')) dream.mood = "confused";
         else dream.mood = "mystical"; // default
 
-        // Try to extract archetype (simple approach)
-        if (_contains(content, "\"archetype\":")) {
+        if (_contains(content, '"archetype":')) {
             dream.archetype = _extractJsonString(content, "archetype");
         } else {
             dream.archetype = "The Dreamer";
         }
 
-        // Try to extract emotion
-        if (_contains(content, "\"emotion\":")) {
+        if (_contains(content, '"emotion":')) {
             dream.emotion = _extractJsonString(content, "emotion");
         } else {
             dream.emotion = "Unknown";
         }
     }
 
-    /**
-     * @dev Simple string contains check
-     */
     function _contains(string memory haystack, string memory needle) internal pure returns (bool) {
         return bytes(haystack).length > 0 && bytes(needle).length > 0 &&
                _indexOf(haystack, needle) != -1;
@@ -401,13 +346,8 @@ contract RitualDreamlog is ERC721, Ownable {
         return -1;
     }
 
-    /**
-     * @dev Extract a string value from JSON by key (simple approach)
-     * @dev Looks for "key":"value" pattern
-     */
     function _extractJsonString(string memory json, string memory key) internal pure returns (string memory) {
         bytes memory jb = bytes(json);
-        bytes memory kb = bytes(key);
         bytes memory search = bytes(abi.encodePacked('"', key, '":"'));
 
         int256 startIdx = _indexOf(json, string(search));
@@ -416,10 +356,8 @@ contract RitualDreamlog is ERC721, Ownable {
         uint256 start = uint256(startIdx) + search.length;
         uint256 end = start;
 
-        // Find closing quote
         for (uint256 i = start; i < jb.length; i++) {
             if (jb[i] == '"') {
-                // Check it's not escaped
                 if (i == 0 || jb[i - 1] != '\\') {
                     end = i;
                     break;
@@ -436,12 +374,9 @@ contract RitualDreamlog is ERC721, Ownable {
         return string(result);
     }
 
-    /**
-     * @dev Escape special JSON characters
-     */
     function _escapeJson(string memory s) internal pure returns (string memory) {
         bytes memory b = bytes(s);
-        bytes memory result = new bytes(b.length * 2); // worst case
+        bytes memory result = new bytes(b.length * 2);
         uint256 j = 0;
 
         for (uint256 i = 0; i < b.length; i++) {
@@ -465,7 +400,6 @@ contract RitualDreamlog is ERC721, Ownable {
             }
         }
 
-        // Trim to actual length
         bytes memory trimmed = new bytes(j);
         for (uint256 i = 0; i < j; i++) {
             trimmed[i] = result[i];
@@ -473,9 +407,6 @@ contract RitualDreamlog is ERC721, Ownable {
         return string(trimmed);
     }
 
-    /**
-     * @dev Withdraw RITUAL from RitualWallet (owner only)
-     */
     function withdrawFees() external onlyOwner {
         (bool success, ) = RITUAL_WALLET.call(
             abi.encodeWithSignature("withdraw(uint256)", type(uint256).max)
@@ -483,9 +414,6 @@ contract RitualDreamlog is ERC721, Ownable {
         require(success, "Withdraw failed");
     }
 
-    /**
-     * @dev Deposit RITUAL to RitualWallet for LLM fees
-     */
     function depositForFees() external payable {
         (bool success, ) = RITUAL_WALLET.call{value: msg.value}(
             abi.encodeWithSignature("deposit(uint256)", 5000)
@@ -493,8 +421,5 @@ contract RitualDreamlog is ERC721, Ownable {
         require(success, "Deposit failed");
     }
 
-    /**
-     * @dev Receive ETH
-     */
     receive() external payable {}
 }

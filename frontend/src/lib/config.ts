@@ -4,7 +4,7 @@ import { defineChain } from "viem";
 
 export const ritualChain = defineChain({
   id: 1979,
-  name: "Ritual",
+  name: "Ritual Testnet",
   nativeCurrency: { name: "RITUAL", symbol: "RITUAL", decimals: 18 },
   rpcUrls: {
     default: {
@@ -27,10 +27,10 @@ export const config = createConfig({
   },
 });
 
-// Contract address (deployed)
-export const CONTRACT_ADDRESS = "0x597b9b030cb9e49fcb612e93eb8892b65dd8b296" as const;
+// Contract address (will be updated after redeploy)
+export const CONTRACT_ADDRESS = "0xE8e8d89868a974e38516F1ce7A909bAb19143deC" as const;
 
-// Contract ABI (minimal - only what frontend needs)
+// Contract ABI (matches updated Dreamlog.sol)
 export const CONTRACT_ABI = [
   {
     name: "submitAndInterpret",
@@ -54,11 +54,10 @@ export const CONTRACT_ABI = [
           { name: "id", type: "uint256" },
           { name: "dreamer", type: "address" },
           { name: "dreamText", type: "string" },
-          { name: "symbols", type: "string[]" },
-          { name: "emotion", type: "string" },
-          { name: "archetype", type: "string" },
           { name: "interpretation", type: "string" },
           { name: "mood", type: "string" },
+          { name: "archetype", type: "string" },
+          { name: "emotion", type: "string" },
           { name: "language", type: "string" },
           { name: "timestamp", type: "uint256" },
           { name: "parentDreamId", type: "uint256" },
@@ -69,11 +68,32 @@ export const CONTRACT_ABI = [
     ],
   },
   {
+    name: "getDreamsByAddress",
+    type: "function",
+    stateMutability: "view",
+    inputs: [{ name: "dreamer", type: "address" }],
+    outputs: [{ name: "", type: "uint256[]" }],
+  },
+  {
     name: "getTotalDreams",
     type: "function",
     stateMutability: "view",
     inputs: [],
     outputs: [{ name: "", type: "uint256" }],
+  },
+  {
+    name: "mintDreamCard",
+    type: "function",
+    stateMutability: "nonpayable",
+    inputs: [{ name: "dreamId", type: "uint256" }],
+    outputs: [{ name: "tokenId", type: "uint256" }],
+  },
+  {
+    name: "depositForFees",
+    type: "function",
+    stateMutability: "payable",
+    inputs: [],
+    outputs: [],
   },
   {
     name: "DreamInterpreted",
@@ -82,6 +102,22 @@ export const CONTRACT_ABI = [
       { name: "dreamId", type: "uint256", indexed: true },
       { name: "mood", type: "string", indexed: false },
       { name: "archetype", type: "string", indexed: false },
+    ],
+  },
+  {
+    name: "DreamSubmitted",
+    type: "event",
+    inputs: [
+      { name: "dreamId", type: "uint256", indexed: true },
+      { name: "dreamer", type: "address", indexed: true },
+      { name: "language", type: "string", indexed: false },
+    ],
+  },
+  {
+    name: "DebugLLM",
+    type: "event",
+    inputs: [
+      { name: "message", type: "string", indexed: false },
     ],
   },
 ] as const;

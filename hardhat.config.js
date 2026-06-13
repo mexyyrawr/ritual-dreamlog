@@ -1,8 +1,7 @@
-import hardhatEthers from "@nomicfoundation/hardhat-ethers";
+require("@nomicfoundation/hardhat-ethers");
 
 /** @type {import('hardhat/config').HardhatUserConfig} */
-export default {
-  plugins: [hardhatEthers],
+module.exports = {
   solidity: {
     version: "0.8.24",
     settings: {
@@ -16,7 +15,6 @@ export default {
   },
   networks: {
     ritual: {
-      type: "http",
       url: "https://rpc.ritualfoundation.org",
       chainId: 1979,
       accounts: process.env.PRIVATE_KEY ? [process.env.PRIVATE_KEY] : [],

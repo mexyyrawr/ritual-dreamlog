@@ -1,48 +1,40 @@
-import { createWalletClient, http, defineChain } from "viem";
-import { privateKeyToAccount } from "viem/accounts";
-import { readFileSync } from "fs";
+const { ethers } = require("hardhat");
+const { readFileSync } = require("fs");
 
-// Load .env manually
-const envContent = readFileSync("./.env", "utf-8");
-const env = Object.fromEntries(
-  envContent.split("\n").filter(l => l.includes("=")).map(l => l.split("="))
-);
-
-// Load contract ABI and bytecode from Hardhat artifacts
-const artifact = JSON.parse(
-  readFileSync("./artifacts/contracts/Dreamlog.sol/RitualDreamlog.json", "utf-8")
-);
-
-const ritualChain = defineChain({
-  id: 1979,
-  name: "Ritual",
-  nativeCurrency: { name: "RITUAL", symbol: "RITUAL", decimals: 18 },
-  rpcUrls: { default: { http: ["https://rpc.ritualfoundation.org"] } },
-});
+// Load .env manually if PRIVATE_KEY not in env
+if (!process.env.PRIVATE_KEY) {
+  try {
+    const envContent = readFileSync("./.env", "utf-8");
+    envContent.split("\n").forEach(line => {
+      const trimmed = line.trim();
+      if (trimmed && trimmed.includes("=")) {
+        const [key, ...valueParts] = trimmed.split("=");
+        process.env[key.trim()] = valueParts.join("=").trim();
+      }
+    });
+  } catch (e) {
+    console.error("Could not load .env:", e.message);
+  }
+}
 
 async function main() {
-  const privateKey = env.PRIVATE_KEY;
-  if (!privateKey) throw new Error("PRIVATE_KEY not set in .env");
-
-  const account = privateKeyToAccount(`0x${privateKey}`);
-  console.log(`🔑 Deploying from: ${account.address}`);
-
-  const walletClient = createWalletClient({
-    account,
-    chain: ritualChain,
-    transport: http(),
-  });
+  const [deployer] = await ethers.getSigners();
+  if (!deployer) {
+    console.error("❌ No deployer account found. Check PRIVATE_KEY in .env");
+    process.exit(1);
+  }
+  console.log(`🔑 Deploying from: ${deployer.address}`);
 
   console.log("🌙 Deploying RitualDreamlog to Ritual Testnet...");
 
-  const hash = await walletClient.deployContract({
-    abi: artifact.abi,
-    bytecode: artifact.bytecode,
-  });
+  const Dreamlog = await ethers.getContractFactory("RitualDreamlog");
+  const dreamlog = await Dreamlog.deploy();
 
-  console.log(`📝 TX Hash: ${hash}`);
-  console.log(`🔗 Explorer: https://explorer.ritualfoundation.org/tx/${hash}`);
-  console.log("⏳ Waiting for confirmation...");
+  await dreamlog.waitForDeployment();
+  const address = await dreamlog.getAddress();
+
+  console.log(`✅ RitualDreamlog deployed to: ${address}`);
+  console.log(`🔗 Explorer: https://explorer.ritualfoundation.org/address/${address}`);
 }
 
 main().catch((error) => {

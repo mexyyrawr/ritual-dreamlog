@@ -1,19 +1,22 @@
 "use client";
 
-import { useAccount, useConnect, useDisconnect, useWriteContract, useWaitForTransactionReceipt } from "wagmi";
-import { useState } from "react";
-import { CONTRACT_ADDRESS, CONTRACT_ABI } from "@/lib/config";
+import { useAccount, useConnect, useDisconnect, useWriteContract, useWaitForTransactionReceipt, useSwitchChain } from "wagmi";
+import { useState, useEffect } from "react";
+import { CONTRACT_ADDRESS, CONTRACT_ABI, ritualChain } from "@/lib/config";
+
+const RITUAL_CHAIN_ID = 1979;
 
 export default function Home() {
-  const { address, isConnected } = useAccount();
+  const { address, isConnected, chain } = useAccount();
   const { connect, connectors } = useConnect();
   const { disconnect } = useDisconnect();
+  const { switchChain } = useSwitchChain();
 
   const [dreamText, setDreamText] = useState("");
   const [language, setLanguage] = useState("id");
-  const [dreamId, setDreamId] = useState<number | null>(null);
   const [status, setStatus] = useState<"idle" | "submitting" | "interpreting" | "done" | "error">("idle");
   const [errorMessage, setErrorMessage] = useState("");
+  const [isWrongNetwork, setIsWrongNetwork] = useState(false);
 
   const { writeContract, data: txHash } = useWriteContract();
 
@@ -21,10 +24,64 @@ export default function Home() {
     hash: txHash,
   });
 
+  // Check if on correct network
+  useEffect(() => {
+    if (isConnected && chain && chain.id !== RITUAL_CHAIN_ID) {
+      setIsWrongNetwork(true);
+    } else {
+      setIsWrongNetwork(false);
+    }
+  }, [isConnected, chain]);
+
+  // Auto-switch to Ritual when connected
+  useEffect(() => {
+    if (isConnected && isWrongNetwork) {
+      handleSwitchNetwork();
+    }
+  }, [isConnected, isWrongNetwork]);
+
+  const handleSwitchNetwork = async () => {
+    try {
+      // Try to switch chain
+      switchChain({ chainId: RITUAL_CHAIN_ID });
+    } catch {
+      // If chain not added, add it manually via wallet_addEthereumChain
+      try {
+        await window.ethereum?.request({
+          method: "wallet_addEthereumChain",
+          params: [
+            {
+              chainId: `0x${RITUAL_CHAIN_ID.toString(16)}`,
+              chainName: "Ritual Testnet",
+              nativeCurrency: {
+                name: "RITUAL",
+                symbol: "RITUAL",
+                decimals: 18,
+              },
+              rpcUrls: ["https://rpc.ritualfoundation.org"],
+              blockExplorerUrls: ["https://explorer.ritualfoundation.org"],
+            },
+          ],
+        });
+      } catch (addError) {
+        console.error("Failed to add Ritual chain:", addError);
+      }
+    }
+  };
+
+  const handleConnect = () => {
+    connect({ connector: connectors[0] });
+  };
+
   const handleSubmit = async () => {
     if (!dreamText.trim()) return;
     if (!isConnected) {
       alert("Connect wallet dulu!");
+      return;
+    }
+    if (isWrongNetwork) {
+      alert("Switch ke Ritual Testnet dulu!");
+      handleSwitchNetwork();
       return;
     }
 
@@ -71,15 +128,6 @@ export default function Home() {
     { code: "zh", label: "🇨🇳 Chinese" },
   ];
 
-  const moodColors: Record<string, string> = {
-    mystical: "from-blue-900/30 to-purple-900/30",
-    dark: "from-gray-900/30 to-red-900/20",
-    zen: "from-teal-900/30 to-green-900/20",
-    wonder: "from-purple-900/30 to-pink-900/20",
-    horror: "from-red-900/30 to-black/30",
-    confused: "from-gray-900/30 to-indigo-900/20",
-  };
-
   return (
     <main className="flex-1 flex flex-col items-center justify-center p-4">
       {/* Header */}
@@ -98,21 +146,35 @@ export default function Home() {
       {/* Wallet Connection */}
       <div className="mb-6">
         {isConnected ? (
-          <div className="flex items-center gap-3 bg-gray-800/50 rounded-lg px-4 py-2 border border-gray-700">
-            <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
-            <span className="text-sm text-gray-300">
-              {address?.slice(0, 6)}...{address?.slice(-4)}
-            </span>
-            <button
-              onClick={() => disconnect()}
-              className="text-xs text-gray-500 hover:text-red-400 transition-colors"
-            >
-              Disconnect
-            </button>
+          <div className="flex flex-col items-center gap-3">
+            <div className="flex items-center gap-3 bg-gray-800/50 rounded-lg px-4 py-2 border border-gray-700">
+              <div className={`w-2 h-2 rounded-full animate-pulse ${isWrongNetwork ? "bg-red-400" : "bg-green-400"}`} />
+              <span className="text-sm text-gray-300">
+                {address?.slice(0, 6)}...{address?.slice(-4)}
+              </span>
+              <span className={`text-xs px-2 py-0.5 rounded ${isWrongNetwork ? "bg-red-900/50 text-red-400" : "bg-green-900/50 text-green-400"}`}>
+                {isWrongNetwork ? `Wrong Network (${chain?.name})` : "Ritual Testnet"}
+              </span>
+              <button
+                onClick={() => disconnect()}
+                className="text-xs text-gray-500 hover:text-red-400 transition-colors"
+              >
+                Disconnect
+              </button>
+            </div>
+
+            {isWrongNetwork && (
+              <button
+                onClick={handleSwitchNetwork}
+                className="bg-gradient-to-r from-orange-600 to-red-600 hover:from-orange-500 hover:to-red-500 text-white px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200"
+              >
+                ⚡ Switch to Ritual Testnet
+              </button>
+            )}
           </div>
         ) : (
           <button
-            onClick={() => connect({ connector: connectors[0] })}
+            onClick={handleConnect}
             className="bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 text-white px-6 py-2.5 rounded-lg font-medium transition-all duration-200 shadow-lg shadow-purple-500/20"
           >
             Connect Wallet
@@ -120,8 +182,17 @@ export default function Home() {
         )}
       </div>
 
+      {/* Wrong Network Banner */}
+      {isConnected && isWrongNetwork && (
+        <div className="w-full max-w-md mb-4 p-3 bg-orange-900/20 border border-orange-800/30 rounded-lg">
+          <p className="text-sm text-orange-400 text-center">
+            ⚠️ Kamu di jaringan <strong>{chain?.name}</strong>. Klik tombol di atas untuk pindah ke <strong>Ritual Testnet</strong>.
+          </p>
+        </div>
+      )}
+
       {/* Dream Form */}
-      {isConnected && (
+      {isConnected && !isWrongNetwork && (
         <div className="w-full max-w-md">
           {/* Language Selector */}
           <div className="mb-4">
@@ -193,7 +264,7 @@ export default function Home() {
 
           {status === "error" && errorMessage && (
             <div className="mt-4 p-3 bg-red-900/20 border border-red-800/30 rounded-lg">
-              <p className="text-xs text-red-400">{errorMessage}</p>
+              <p className="text-xs text-red-400 break-all">{errorMessage}</p>
             </div>
           )}
 
