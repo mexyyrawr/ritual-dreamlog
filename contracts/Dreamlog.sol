@@ -7,95 +7,127 @@ contract Dreamlog is PrecompileConsumer {
     address constant RITUAL_WALLET = 0x532F0dF0896F353d8C3DD8cc134e8129DA2a3948;
 
     struct Dream {
-        uint256 id;
-        address dreamer;
-        string dreamText;
-        string interpretation;
-        string mood;
-        string archetype;
-        string emotion;
-        string language;
+        address owner;
+        string text;
         uint256 timestamp;
-        bool interpreted;
+        uint8 mood;        // 0=unset, 1=mystical, 2=dark, 3=zen, 4=wonder, 5=horror, 6=confused
+        string interpretation;
+        string archetype;
     }
 
-    uint256 public nextDreamId;
     mapping(uint256 => Dream) public dreams;
-    mapping(address => uint256[]) public dreamerDreams;
+    uint256 public dreamCount;
+    address public owner;
 
-    event DreamSubmitted(uint256 indexed dreamId, address indexed dreamer, string language);
-    event DreamInterpreted(uint256 indexed dreamId, string mood, string archetype);
+    event DreamSubmitted(uint256 indexed dreamId, address indexed owner, string text);
+    event DreamInterpreted(uint256 indexed dreamId, string interpretation, uint8 mood);
 
-    /// @notice Accept RIT and deposit to RitualWallet
+    constructor() {
+        owner = msg.sender;
+    }
+
+    /// @notice CRITICAL: receive() auto-deposits to RitualWallet
+    /// Without this, the contract cannot pay for precompile calls
     receive() external payable {
-        // Auto-deposit to RitualWallet when receiving RIT
         (bool ok,) = RITUAL_WALLET.call{value: msg.value}(
-            abi.encodeWithSelector(bytes4(keccak256("deposit(uint256)")), uint256(100000))
+            abi.encodeWithSelector(
+                bytes4(keccak256("deposit(uint256)")),
+                uint256(100000) // lock for 100000 blocks ≈ 10 hours
+            )
         );
         require(ok, "Auto-deposit failed");
     }
 
-    /// @notice Submit a dream
-    function submitDream(string calldata dreamText, string calldata language) external returns (uint256 dreamId) {
-        dreamId = nextDreamId++;
+    function submitDream(string calldata text) external returns (uint256 dreamId) {
+        dreamId = dreamCount++;
         dreams[dreamId] = Dream({
-            id: dreamId,
-            dreamer: msg.sender,
-            dreamText: dreamText,
-            interpretation: "",
-            mood: "",
-            archetype: "",
-            emotion: "",
-            language: language,
+            owner: msg.sender,
+            text: text,
             timestamp: block.timestamp,
-            interpreted: false
+            mood: 0,
+            interpretation: "",
+            archetype: ""
         });
-        dreamerDreams[msg.sender].push(dreamId);
-        emit DreamSubmitted(dreamId, msg.sender, language);
+        emit DreamSubmitted(dreamId, msg.sender, text);
     }
 
-    /// @notice Call LLM precompile
+    /// @notice Call LLM precompile with pre-encoded bytes from frontend
+    /// Frontend must encode the 30-field LLM request using viem's encodeAbiParameters
+    /// The contract forwards these bytes directly via _executePrecompile()
     function interpretDream(uint256 dreamId, bytes calldata llmInput) external {
-        require(dreams[dreamId].dreamer == msg.sender, "not your dream");
-        require(!dreams[dreamId].interpreted, "already interpreted");
+        require(dreamId < dreamCount, "Dream not found");
+        require(bytes(dreams[dreamId].interpretation).length == 0, "Already interpreted");
 
-        bytes memory output = _executePrecompile(LLM_INFERENCE_PRECOMPILE, llmInput);
+        // Forward pre-encoded bytes to precompile (no Solidity abi.encode involved!)
+        bytes memory rawOutput = _executePrecompile(LLM_INFERENCE_PRECOMPILE, llmInput);
 
+        // Unwrap async envelope: (bytes simmedInput, bytes actualOutput)
+        (, bytes memory actualOutput) = abi.decode(rawOutput, (bytes, bytes));
+
+        // Decode first 4 fields (Solidity can't decode inline tuples)
         (bool hasError, bytes memory completionData, , string memory errorMessage) =
-            abi.decode(output, (bool, bytes, bytes, string));
+            abi.decode(actualOutput, (bool, bytes, bytes, string));
 
         require(!hasError, errorMessage);
 
-        string memory interpretation = _bytesToString(completionData);
-        dreams[dreamId].interpretation = interpretation;
-        dreams[dreamId].interpreted = true;
+        // Decode completionData to get content
+        // CompletionData: (string id, string object, uint256 created, string model,
+        //   string systemFingerprint, string serviceTier, uint256 choicesCount, bytes[] choicesData, bytes usageData)
+        (, , , , , , uint256 choicesCount, bytes[] memory choicesData, ) =
+            abi.decode(completionData, (string, string, uint256, string, string, string, uint256, bytes[], bytes));
 
-        emit DreamInterpreted(dreamId, "mystical", "unknown");
+        string memory content = "";
+        if (choicesCount > 0 && choicesData.length > 0) {
+            // Choice: (uint256 index, string finishReason, bytes messageData)
+            (, , bytes memory messageData) = abi.decode(choicesData[0], (uint256, string, bytes));
+            // Message: (string role, string content, string refusal, uint256 toolCallsCount, bytes[] toolCallsData)
+            (, content, , , ) = abi.decode(messageData, (string, string, string, uint256, bytes[]));
+        }
+
+        // Parse mood from content
+        uint8 mood = _parseMood(content);
+
+        dreams[dreamId].interpretation = content;
+        dreams[dreamId].mood = mood;
+
+        emit DreamInterpreted(dreamId, content, mood);
     }
 
     function storeResult(uint256 dreamId, string calldata interpretation) external {
-        require(dreams[dreamId].dreamer == msg.sender, "not your dream");
+        require(dreamId < dreamCount, "Dream not found");
+        require(bytes(dreams[dreamId].interpretation).length == 0, "Already interpreted");
+        uint8 mood = _parseMood(interpretation);
         dreams[dreamId].interpretation = interpretation;
-        dreams[dreamId].interpreted = true;
+        dreams[dreamId].mood = mood;
+        emit DreamInterpreted(dreamId, interpretation, mood);
     }
 
-    function getDream(uint256 dreamId) external view returns (Dream memory) {
-        return dreams[dreamId];
+    function _parseMood(string memory text) internal pure returns (uint8) {
+        bytes memory b = bytes(text);
+        string memory lower = "";
+        // Simple lowercase - just check uppercase variants too
+        if (_contains(b, "mystical") || _contains(b, "MYSTICAL") || _contains(b, "mystic")) return 1;
+        if (_contains(b, "dark") || _contains(b, "DARK") || _contains(b, "shadow")) return 2;
+        if (_contains(b, "zen") || _contains(b, "ZEN") || _contains(b, "peace") || _contains(b, "calm")) return 3;
+        if (_contains(b, "wonder") || _contains(b, "WONDER") || _contains(b, "magical") || _contains(b, "joy")) return 4;
+        if (_contains(b, "horror") || _contains(b, "HORROR") || _contains(b, "fear") || _contains(b, "terror")) return 5;
+        if (_contains(b, "confus") || _contains(b, "CONFUS") || _contains(b, "absurd") || _contains(b, "surreal")) return 6;
+        return 1; // default mystical
     }
 
-    function getDreamsByAddress(address dreamer) external view returns (uint256[] memory) {
-        return dreamerDreams[dreamer];
-    }
-
-    function getTotalDreams() external view returns (uint256) {
-        return nextDreamId;
-    }
-
-    function _bytesToString(bytes memory data) internal pure returns (string memory) {
-        bytes memory result = new bytes(data.length);
-        for (uint256 i = 0; i < data.length; i++) {
-            result[i] = data[i];
+    function _contains(bytes memory haystack, string memory needle) internal pure returns (bool) {
+        bytes memory needleBytes = bytes(needle);
+        if (needleBytes.length > haystack.length) return false;
+        for (uint256 i = 0; i <= haystack.length - needleBytes.length; i++) {
+            bool found = true;
+            for (uint256 j = 0; j < needleBytes.length; j++) {
+                if (haystack[i + j] != needleBytes[j]) {
+                    found = false;
+                    break;
+                }
+            }
+            if (found) return true;
         }
-        return string(result);
+        return false;
     }
 }
