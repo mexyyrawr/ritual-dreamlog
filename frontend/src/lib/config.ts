@@ -27,10 +27,10 @@ export const config = createConfig({
   },
 });
 
-// Contract address (PrecompileConsumer architecture)
+// Contract address (EOA direct call architecture)
 export const CONTRACT_ADDRESS = "0xb1fB621c97e39235A06B660731C9EC409232e9BA" as const;
 
-// Contract ABI (PrecompileConsumer architecture)
+// Contract ABI (simple storage only - LLM calls go direct from EOA)
 export const CONTRACT_ABI = [
   {
     name: "submitDream",
@@ -41,23 +41,6 @@ export const CONTRACT_ABI = [
       { name: "language", type: "string" },
     ],
     outputs: [{ name: "dreamId", type: "uint256" }],
-  },
-  {
-    name: "interpretDream",
-    type: "function",
-    stateMutability: "payable",
-    inputs: [
-      { name: "dreamId", type: "uint256" },
-      { name: "llmInput", type: "bytes" },
-    ],
-    outputs: [],
-  },
-  {
-    name: "depositForFees",
-    type: "function",
-    stateMutability: "payable",
-    inputs: [],
-    outputs: [],
   },
   {
     name: "storeResult",
@@ -87,26 +70,10 @@ export const CONTRACT_ABI = [
           { name: "emotion", type: "string" },
           { name: "language", type: "string" },
           { name: "timestamp", type: "uint256" },
-          { name: "parentDreamId", type: "uint256" },
-          { name: "minted", type: "bool" },
           { name: "interpreted", type: "bool" },
         ],
       },
     ],
-  },
-  {
-    name: "getDreamsByAddress",
-    type: "function",
-    stateMutability: "view",
-    inputs: [{ name: "dreamer", type: "address" }],
-    outputs: [{ name: "", type: "uint256[]" }],
-  },
-  {
-    name: "getTotalDreams",
-    type: "function",
-    stateMutability: "view",
-    inputs: [],
-    outputs: [{ name: "", type: "uint256" }],
   },
   {
     name: "DreamSubmitted",
@@ -115,15 +82,6 @@ export const CONTRACT_ABI = [
       { name: "dreamId", type: "uint256", indexed: true },
       { name: "dreamer", type: "address", indexed: true },
       { name: "language", type: "string", indexed: false },
-    ],
-  },
-  {
-    name: "DreamInterpreted",
-    type: "event",
-    inputs: [
-      { name: "dreamId", type: "uint256", indexed: true },
-      { name: "mood", type: "string", indexed: false },
-      { name: "archetype", type: "string", indexed: false },
     ],
   },
 ] as const;
