@@ -47,22 +47,26 @@ export default function Home() {
     } catch {
       // If chain not added, add it manually via wallet_addEthereumChain
       try {
-        await window.ethereum?.request({
-          method: "wallet_addEthereumChain",
-          params: [
-            {
-              chainId: `0x${RITUAL_CHAIN_ID.toString(16)}`,
-              chainName: "Ritual Testnet",
-              nativeCurrency: {
-                name: "RITUAL",
-                symbol: "RITUAL",
-                decimals: 18,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const ethereum = (window as any).ethereum;
+        if (ethereum) {
+          await ethereum.request({
+            method: "wallet_addEthereumChain",
+            params: [
+              {
+                chainId: `0x${RITUAL_CHAIN_ID.toString(16)}`,
+                chainName: "Ritual Testnet",
+                nativeCurrency: {
+                  name: "RITUAL",
+                  symbol: "RITUAL",
+                  decimals: 18,
+                },
+                rpcUrls: ["https://rpc.ritualfoundation.org"],
+                blockExplorerUrls: ["https://explorer.ritualfoundation.org"],
               },
-              rpcUrls: ["https://rpc.ritualfoundation.org"],
-              blockExplorerUrls: ["https://explorer.ritualfoundation.org"],
-            },
-          ],
-        });
+            ],
+          });
+        }
       } catch (addError) {
         console.error("Failed to add Ritual chain:", addError);
       }
