@@ -26,7 +26,16 @@ contract Dreamlog is PrecompileConsumer {
     event DreamSubmitted(uint256 indexed dreamId, address indexed dreamer, string language);
     event DreamInterpreted(uint256 indexed dreamId, string mood, string archetype);
 
-    /// @notice Submit a dream to the journal
+    /// @notice Accept RIT and deposit to RitualWallet
+    receive() external payable {
+        // Auto-deposit to RitualWallet when receiving RIT
+        (bool ok,) = RITUAL_WALLET.call{value: msg.value}(
+            abi.encodeWithSelector(bytes4(keccak256("deposit(uint256)")), uint256(100000))
+        );
+        require(ok, "Auto-deposit failed");
+    }
+
+    /// @notice Submit a dream
     function submitDream(string calldata dreamText, string calldata language) external returns (uint256 dreamId) {
         dreamId = nextDreamId++;
         dreams[dreamId] = Dream({
@@ -45,7 +54,7 @@ contract Dreamlog is PrecompileConsumer {
         emit DreamSubmitted(dreamId, msg.sender, language);
     }
 
-    /// @notice Call the LLM precompile to interpret a dream
+    /// @notice Call LLM precompile
     function interpretDream(uint256 dreamId, bytes calldata llmInput) external {
         require(dreams[dreamId].dreamer == msg.sender, "not your dream");
         require(!dreams[dreamId].interpreted, "already interpreted");
@@ -89,7 +98,4 @@ contract Dreamlog is PrecompileConsumer {
         }
         return string(result);
     }
-
-    /// @notice Allow contract to receive RIT
-    receive() external payable {}
 }

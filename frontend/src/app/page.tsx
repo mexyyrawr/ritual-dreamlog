@@ -3,10 +3,9 @@
 import { useAccount, useConnect, useDisconnect, useWriteContract, useWaitForTransactionReceipt, useSwitchChain } from "wagmi";
 import { useState, useEffect } from "react";
 import { CONTRACT_ADDRESS, CONTRACT_ABI, ritualChain } from "@/lib/config";
-import { encodeAbiParameters, parseAbiParameters, decodeAbiParameters, type Hex } from "viem";
+import { encodeAbiParameters, parseAbiParameters, type Hex } from "viem";
 
 const RITUAL_CHAIN_ID = 1979;
-const LLM_PRECOMPILE = "0x0000000000000000000000000000000000000802" as const;
 const RITUAL_WALLET = "0x532F0dF0896F353d8C3DD8cc134e8129DA2a3948" as const;
 const TEE_EXECUTOR = "0xB42e435c4252A5a2E7440e37B609F00c61a0c91B" as const;
 
@@ -23,7 +22,6 @@ export default function Home() {
   const [isWrongNetwork, setIsWrongNetwork] = useState(false);
   const [dreamId, setDreamId] = useState<number | null>(null);
   const [debugLog, setDebugLog] = useState<string[]>([]);
-  const [interpretation, setInterpretation] = useState("");
 
   const { writeContract, data: txHash } = useWriteContract();
   const { isSuccess: isConfirmed } = useWaitForTransactionReceipt({ hash: txHash });
@@ -59,87 +57,58 @@ export default function Home() {
     if (!isConnected) return;
     setStatus("depositing"); setErrorMessage("");
     try {
-      log("Depositing 0.5 RIT to RitualWallet (your own balance)...");
+      log("Sending 0.5 RIT to contract (auto-deposits to RitualWallet)...");
       writeContract({
-        address: RITUAL_WALLET,
-        abi: [{ name: "deposit", type: "function", stateMutability: "payable", inputs: [{ name: "lockDuration", type: "uint256" }], outputs: [] }],
-        functionName: "deposit",
-        args: [100000n],
+        address: CONTRACT_ADDRESS,
+        abi: [],
+        functionName: "fallback",
         value: BigInt("500000000000000000")
       }, {
-        onSuccess: () => { log("✅ Deposit TX sent!"); setStatus("idle"); },
+        onSuccess: () => { log("✅ RIT sent! Contract will auto-deposit to RitualWallet."); setStatus("idle"); },
         onError: (error) => { setStatus("error"); setErrorMessage(`Deposit: ${error.message}`); log(`Error: ${error.message}`); },
       });
     } catch (err: unknown) { setStatus("error"); setErrorMessage(err instanceof Error ? err.message : "Deposit failed"); }
   };
 
+  const encodeLLMRequest = (): Hex => {
+    const sys = 'You are a dream interpreter. Analyze the dream and reply with ONLY a JSON object: {"symbols":["sym1","sym2"],"emotion":"emotion","archetype":"archetype","interpretation":"2-3 sentences","mood":"mystical|dark|zen|wonder|horror|confused"}. No markdown, just JSON.';
+    const msg = JSON.stringify([{ role: "system", content: sys }, { role: "user", content: dreamText }]);
+
+    return encodeAbiParameters(
+      parseAbiParameters(["address, bytes[], uint256, bytes[], bytes,", "string, string, int256, string, bool, int256, string, string,", "uint256, bool, int256, string, bytes, int256, string, string, bool,", "int256, bytes, bytes, int256, int256, string, bool,", "(string,string,string)"].join("")),
+      [TEE_EXECUTOR, [], 300n, [], "0x" as Hex, msg, "zai-org/GLM-4.7-FP8", 0n, "", false, 4096n, "", "", 1n, true, 0n, "medium", "0x" as Hex, -1n, "auto", "", false, 700n, "0x" as Hex, "0x" as Hex, -1n, 1000n, "", false, ["", "", ""]]
+    );
+  };
+
   const handleSubmit = async () => {
     if (!dreamText.trim() || !isConnected || isWrongNetwork) return;
-    setStatus("submitting"); setErrorMessage(""); setDreamId(null); setInterpretation("");
+    setStatus("submitting"); setErrorMessage(""); setDreamId(null);
     try {
       log("Step 1: Submitting dream...");
       writeContract({ address: CONTRACT_ADDRESS, abi: CONTRACT_ABI, functionName: "submitDream", args: [dreamText, language] }, {
-        onSuccess: () => { log("Dream submitted! Calling LLM..."); setStatus("interpreting"); callLLMDirect(); },
+        onSuccess: () => { log("Dream submitted! Calling LLM via contract..."); setStatus("interpreting"); callLLMViaContract(); },
         onError: (error) => { setStatus("error"); setErrorMessage(`Submit: ${error.message}`); log(`Error: ${error.message}`); },
       });
     } catch (err: unknown) { setStatus("error"); setErrorMessage(err instanceof Error ? err.message : "Unknown"); }
   };
 
-  const callLLMDirect = async () => {
+  const callLLMViaContract = async () => {
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const ethereum = (window as any).ethereum;
-      if (!ethereum) throw new Error("MetaMask not found");
-
-      const sys = 'You are a dream interpreter. Analyze the dream and reply with ONLY a JSON object: {"symbols":["sym1","sym2"],"emotion":"emotion","archetype":"archetype","interpretation":"2-3 sentences","mood":"mystical|dark|zen|wonder|horror|confused"}. No markdown, just JSON.';
-      const msg = JSON.stringify([{ role: "system", content: sys }, { role: "user", content: dreamText }]);
-
       log("Encoding LLM request...");
-      const encoded = encodeAbiParameters(
-        parseAbiParameters(["address, bytes[], uint256, bytes[], bytes,", "string, string, int256, string, bool, int256, string, string,", "uint256, bool, int256, string, bytes, int256, string, string, bool,", "int256, bytes, bytes, int256, int256, string, bool,", "(string,string,string)"].join("")),
-        [TEE_EXECUTOR, [], 300n, [], "0x" as Hex, msg, "zai-org/GLM-4.7-FP8", 0n, "", false, 4096n, "", "", 1n, true, 0n, "medium", "0x" as Hex, -1n, "auto", "", false, 700n, "0x" as Hex, "0x" as Hex, -1n, 1000n, "", false, ["", "", ""]]
-      );
+      const llmInput = encodeLLMRequest();
+      log(`Encoded: ${llmInput.length / 2} bytes`);
 
-      log(`Sending to precompile (${encoded.length / 2} bytes, gas: 10M)...`);
-      const llmTxHash = await ethereum.request({ method: "eth_sendTransaction", params: [{ from: address, to: LLM_PRECOMPILE, data: encoded, gas: "0x989680" }] });
-      log(`LLM TX: ${llmTxHash}`);
-
-      // Poll for result
-      log("Waiting for LLM settlement (max 90s)...");
-      for (let i = 0; i < 30; i++) {
-        await new Promise(r => setTimeout(r, 3000));
-        const receipt = await ethereum.request({ method: "eth_getTransactionReceipt", params: [llmTxHash] });
-        if (receipt?.status === "0x1") {
-          log("✅ TX confirmed! Extracting LLM result...");
-          // Try spcCalls
-          if (receipt.spcCalls?.length > 0) {
-            for (const call of receipt.spcCalls) {
-              if (call.output && call.output.length > 10) {
-                try {
-                  const decoded = decodeAbiParameters(parseAbiParameters("bool, bytes, bytes, string"), call.output as Hex);
-                  if (!decoded[0] && decoded[1]) {
-                    const completion = decodeAbiParameters(parseAbiParameters("string, string, uint256, string, string, string, uint256, bytes[], bytes"), decoded[1] as Hex);
-                    if (completion[7]?.length > 0) {
-                      const choice = decodeAbiParameters(parseAbiParameters("uint256, string, bytes"), completion[7][0] as Hex);
-                      const msgData = decodeAbiParameters(parseAbiParameters("string, string, string, uint256, bytes[]"), choice[2] as Hex);
-                      setInterpretation(msgData[1] as string);
-                      log(`Result: ${(msgData[1] as string).slice(0, 100)}...`);
-                    }
-                  }
-                } catch (e) { log(`Decode err: ${e}`); }
-              }
-            }
-          }
-          // Store result
-          setStatus("storing");
-          return;
-        }
-        if (receipt?.status === "0x0") {
-          throw new Error("LLM TX failed on-chain. Check RitualWallet deposit.");
-        }
-      }
-      throw new Error("Timeout (90s). LLM may still be processing.");
-    } catch (err: unknown) { setStatus("error"); const m = err instanceof Error ? err.message : "LLM failed"; setErrorMessage(m); log(`Error: ${m}`); }
+      log("Step 2: Calling contract.interpretDream()...");
+      writeContract({
+        address: CONTRACT_ADDRESS,
+        abi: CONTRACT_ABI,
+        functionName: "interpretDream",
+        args: [BigInt(dreamId ?? 0), llmInput]
+      }, {
+        onSuccess: () => { log("✅ interpretDream TX sent! LLM processing on-chain..."); setStatus("storing"); },
+        onError: (error) => { setStatus("error"); setErrorMessage(`LLM: ${error.message}`); log(`Error: ${error.message}`); },
+      });
+    } catch (err: unknown) { setStatus("error"); const m = err instanceof Error ? err.message : "LLM encoding failed"; setErrorMessage(m); log(`Error: ${m}`); }
   };
 
   useEffect(() => {
@@ -153,7 +122,11 @@ export default function Home() {
         } catch {}
       })();
     }
-  }, [isConfirmed, txHash, dreamId]);
+    if (isConfirmed && txHash && status === "storing") {
+      log("✅ LLM interpretation complete! Dream saved on-chain.");
+      setStatus("done");
+    }
+  }, [isConfirmed, txHash, dreamId, status]);
 
   const languages = [{ code: "id", label: "🇮🇩 Indonesia" }, { code: "en", label: "🇬🇧 English" }, { code: "ja", label: "🇯🇵 Japan" }, { code: "ko", label: "🇰🇷 Korea" }, { code: "ar", label: "🇸🇦 Arabic" }, { code: "es", label: "🇪🇸 Spanish" }, { code: "pt", label: "🇧🇷 Portuguese" }, { code: "zh", label: "🇨🇳 Chinese" }];
 
@@ -183,7 +156,7 @@ export default function Home() {
 
       {isConnected && !isWrongNetwork && (
         <div className="w-full max-w-md">
-          <div className="mb-4"><button onClick={handleDeposit} disabled={status === "depositing"} className="w-full bg-gradient-to-r from-green-700 to-emerald-700 hover:from-green-600 hover:to-emerald-600 disabled:from-gray-700 disabled:text-gray-500 text-white py-2 rounded-lg text-sm font-medium">{status === "depositing" ? "⏳ Depositing..." : "💰 Deposit 0.5 RIT to RitualWallet"}</button></div>
+          <div className="mb-4"><button onClick={handleDeposit} disabled={status === "depositing"} className="w-full bg-gradient-to-r from-green-700 to-emerald-700 hover:from-green-600 hover:to-emerald-600 disabled:from-gray-700 disabled:text-gray-500 text-white py-2 rounded-lg text-sm font-medium">{status === "depositing" ? "⏳ Depositing..." : "💰 Deposit 0.5 RIT (auto-deposits to RitualWallet)"}</button></div>
           <div className="mb-4"><label className="block text-xs text-gray-500 mb-2 uppercase tracking-wider">Bahasa / Language</label><select value={language} onChange={(e) => setLanguage(e.target.value)} className="w-full bg-gray-800/50 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-300 focus:outline-none focus:border-purple-500">{languages.map((l) => <option key={l.code} value={l.code}>{l.label}</option>)}</select></div>
           <div className="mb-4"><label className="block text-xs text-gray-500 mb-2 uppercase tracking-wider">Ceritakan Mimpimu</label><textarea value={dreamText} onChange={(e) => setDreamText(e.target.value)} placeholder="Aku bermimpi terbang di atas kota..." rows={4} className="w-full bg-gray-800/50 border border-gray-700 rounded-lg px-4 py-3 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-purple-500 resize-none" /></div>
           <button onClick={handleSubmit} disabled={!dreamText.trim() || ["submitting", "interpreting", "storing", "depositing"].includes(status)} className="w-full bg-gradient-to-r from-purple-600 to-blue-600 disabled:from-gray-700 disabled:text-gray-500 text-white py-3 rounded-lg font-medium shadow-lg shadow-purple-500/20 disabled:shadow-none">
@@ -198,13 +171,7 @@ export default function Home() {
           {txHash && <div className="mt-4 text-center"><a href={`https://explorer.ritualfoundation.org/tx/${txHash}`} target="_blank" rel="noopener noreferrer" className="text-xs text-purple-400">View on Explorer →</a></div>}
           {status === "interpreting" && <div className="mt-4 text-center"><div className="inline-flex items-center gap-2 text-sm text-gray-400"><div className="w-4 h-4 border-2 border-purple-500 border-t-transparent rounded-full animate-spin" />LLM interpreting... (10-40 detik)</div></div>}
           {status === "error" && errorMessage && <div className="mt-4 p-3 bg-red-900/20 border border-red-800/30 rounded-lg"><p className="text-xs text-red-400 break-all">{errorMessage}</p></div>}
-          {status === "done" && interpretation && (
-            <div className="mt-6 p-4 bg-gradient-to-br from-purple-900/20 to-blue-900/20 border border-purple-800/30 rounded-xl">
-              <p className="text-center text-sm text-gray-300 mb-2">✨ Dream interpreted!</p>
-              <p className="text-xs text-gray-400">{interpretation}</p>
-            </div>
-          )}
-          {status === "done" && !interpretation && <div className="mt-6 p-4 bg-gradient-to-br from-purple-900/20 to-blue-900/20 border border-purple-800/30 rounded-xl"><p className="text-center text-sm text-gray-300">✨ Dream saved!</p></div>}
+          {status === "done" && <div className="mt-6 p-4 bg-gradient-to-br from-purple-900/20 to-blue-900/20 border border-purple-800/30 rounded-xl"><p className="text-center text-sm text-gray-300">✨ Dream interpreted and saved!</p></div>}
           {debugLog.length > 0 && <div className="mt-4 p-2 bg-gray-900/50 rounded-lg border border-gray-800"><p className="text-xs text-gray-500 mb-1">Debug:</p>{debugLog.map((e, i) => <p key={i} className="text-xs text-gray-400 font-mono">{e}</p>)}</div>}
         </div>
       )}
