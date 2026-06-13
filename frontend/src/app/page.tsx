@@ -3,14 +3,9 @@
 import { useAccount, useConnect, useDisconnect, useWriteContract, useWaitForTransactionReceipt, useSwitchChain } from "wagmi";
 import { useState, useEffect } from "react";
 import { CONTRACT_ADDRESS, CONTRACT_ABI, ritualChain } from "@/lib/config";
-import { encodeAbiParameters, parseAbiParameters, decodeAbiParameters, type Hex } from "viem";
+import { encodeAbiParameters, parseAbiParameters, type Hex } from "viem";
 
 const RITUAL_CHAIN_ID = 1979;
-const LLM_PRECOMPILE = "0x0000000000000000000000000000000000000802" as const;
-const RITUAL_WALLET = "0x532F0dF0896F353d8C3DD8cc134e8129DA2a3948" as const;
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type AnyReceipt = any;
 
 export default function Home() {
   const { address, isConnected, chain } = useAccount();
@@ -20,12 +15,11 @@ export default function Home() {
 
   const [dreamText, setDreamText] = useState("");
   const [language, setLanguage] = useState("id");
-  const [status, setStatus] = useState<"idle" | "submitting" | "interpreting" | "storing" | "done" | "error" | "depositing">("idle");
+  const [status, setStatus] = useState<"idle" | "submitting" | "interpreting" | "storing" | "done" | "error">("idle");
   const [errorMessage, setErrorMessage] = useState("");
   const [isWrongNetwork, setIsWrongNetwork] = useState(false);
   const [dreamId, setDreamId] = useState<number | null>(null);
   const [debugLog, setDebugLog] = useState<string[]>([]);
-  const [txType, setTxType] = useState<"deposit" | "submit" | null>(null);
 
   const { writeContract, data: txHash } = useWriteContract();
   const { isSuccess: isConfirmed } = useWaitForTransactionReceipt({ hash: txHash });
@@ -57,126 +51,92 @@ export default function Home() {
     }
   };
 
-  const handleDeposit = async () => {
-    if (!isConnected) return;
-    setStatus("depositing"); setErrorMessage(""); setTxType("deposit");
-    try {
-      writeContract({ address: RITUAL_WALLET, abi: [{ name: "deposit", type: "function", stateMutability: "payable", inputs: [{ name: "lockDuration", type: "uint256" }], outputs: [] }], functionName: "deposit", args: [5000n], value: BigInt("500000000000000000") });
-      log("Depositing 0.5 RIT to RitualWallet...");
-    } catch (err: unknown) { setStatus("error"); setErrorMessage(err instanceof Error ? err.message : "Deposit failed"); }
+  const encodeLLMRequest = (): Hex => {
+    const sys = 'You are a dream interpreter. Analyze the dream and reply with ONLY a JSON object: {"symbols":["sym1","sym2"],"emotion":"emotion","archetype":"archetype","interpretation":"2-3 sentences","mood":"mystical|dark|zen|wonder|horror|confused"}. No markdown, just JSON.';
+    const msg = JSON.stringify([{ role: "system", content: sys }, { role: "user", content: dreamText }]);
+
+    // Encode the 25-field LLM request
+    // Field order: executor, encryptedSecrets, ttl, secretSignatures, userPublicKey,
+    //   messagesJson, model, frequencyPenalty, logitBias, logprobs, maxCompletionTokens,
+    //   n, parallelToolCalls, presencePenalty, responseFormat, seed, serviceTier, stop,
+    //   stream, temperature, toolChoice, tools, topLogprobs, topP, convoHistory
+    const encoded = encodeAbiParameters(
+      parseAbiParameters([
+        "address, bytes[], uint256, bytes[], bytes,",
+        "string, string, int256, string, bool, int256, string, string,",
+        "uint256, bool, int256, string, bytes, int256, string, string, bool,",
+        "int256, bytes, bytes, int256, int256, string, bool,",
+        "(string,string,string)"
+      ].join("")),
+      [
+        "0x0000000000000000000000000000000000000000" as `0x${string}`, // executor (will be set by contract)
+        [],           // encryptedSecrets
+        300n,         // ttl (blocks)
+        [],           // secretSignatures
+        "0x" as Hex,  // userPublicKey (empty = plaintext)
+        msg,          // messagesJson (field 5)
+        "zai-org/GLM-4.7-FP8", // model (field 6)
+        0n,           // frequencyPenalty
+        "",           // logitBias
+        false,        // logprobs
+        4096n,        // maxCompletionTokens
+        "",           // n
+        "",           // parallelToolCalls
+        1n,           // presencePenalty
+        true,         // responseFormat
+        0n,           // seed
+        "medium",     // serviceTier
+        "0x" as Hex,  // stop
+        -1n,          // stream
+        "auto",       // temperature
+        "",           // toolChoice
+        false,        // tools
+        700n,         // topLogprobs
+        "0x" as Hex,  // topP
+        "0x" as Hex,  // topLogprobs
+        -1n,          // topP
+        1000n,        // convoHistory
+        "",           // ...
+        false,        // ...
+        ["", "", ""]  // convoHistory tuple
+      ]
+    );
+    return encoded;
   };
 
   const handleSubmit = async () => {
     if (!dreamText.trim() || !isConnected || isWrongNetwork) return;
-    setStatus("submitting"); setErrorMessage(""); setDreamId(null); setTxType("submit");
+    setStatus("submitting"); setErrorMessage(""); setDreamId(null);
     try {
       log("Step 1: Submitting dream...");
       writeContract({ address: CONTRACT_ADDRESS, abi: CONTRACT_ABI, functionName: "submitDream", args: [dreamText, language] }, {
-        onSuccess: () => { log("Dream submitted! Calling LLM..."); setStatus("interpreting"); callLLMPrecompile(); },
+        onSuccess: () => { log("Dream submitted! Calling LLM via contract..."); setStatus("interpreting"); callLLMViaContract(); },
         onError: (error) => { setStatus("error"); setErrorMessage(`Submit: ${error.message}`); log(`Error: ${error.message}`); },
       });
     } catch (err: unknown) { setStatus("error"); setErrorMessage(err instanceof Error ? err.message : "Unknown"); }
   };
 
-  const callLLMPrecompile = async () => {
-    let llmTxHash: string | undefined;
+  const callLLMViaContract = async () => {
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const ethereum = (window as any).ethereum;
-      if (!ethereum) throw new Error("MetaMask not found");
+      log("Encoding LLM request (25-field ABI)...");
+      const llmInput = encodeLLMRequest();
+      log(`Encoded: ${llmInput.length / 2} bytes`);
 
-      const sys = 'You are a dream interpreter. Analyze the dream and reply with ONLY a JSON object: {"symbols":["sym1","sym2"],"emotion":"emotion","archetype":"archetype","interpretation":"2-3 sentences","mood":"mystical|dark|zen|wonder|horror|confused"}. No markdown, just JSON.';
-      const msg = JSON.stringify([{ role: "system", content: sys }, { role: "user", content: dreamText }]);
-
-      log("Encoding LLM call...");
-      const encoded = encodeAbiParameters(
-        parseAbiParameters(["address, bytes[], uint256, bytes[], bytes,", "string, string, int256, string, bool, int256, string, string,", "uint256, bool, int256, string, bytes, int256, string, string, bool,", "int256, bytes, bytes, int256, int256, string, bool,", "(string,string,string)"].join("")),
-        [address as `0x${string}`, [], 300n, [], "0x" as Hex, msg, "zai-org/GLM-4.7-FP8", 0n, "", false, 4096n, "", "", 1n, true, 0n, "medium", "0x" as Hex, -1n, "auto", "", false, 700n, "0x" as Hex, "0x" as Hex, -1n, 1000n, "", false, ["", "", ""]]
-      );
-
-      log(`Sending to precompile (${encoded.length / 2} bytes)...`);
-      try {
-        llmTxHash = await ethereum.request({ method: "eth_sendTransaction", params: [{ from: address, to: LLM_PRECOMPILE, data: encoded, gas: "0x4C4B40" }] });
-        log(`LLM TX: ${llmTxHash}`);
-      } catch (sendErr: unknown) {
-        const sendMsg = sendErr instanceof Error ? sendErr.message : JSON.stringify(sendErr);
-        log(`Send failed: ${sendMsg}`);
-        throw new Error(`eth_sendTransaction failed: ${sendMsg}`);
-      }
-
-      // Wait for receipt
-      if (!llmTxHash) throw new Error("No TX hash from LLM call");
-      const receipt: AnyReceipt = await waitForReceipt(llmTxHash!);
-      log(`Status: ${receipt.status}, logs: ${receipt.logs?.length || 0}, keys: ${Object.keys(receipt).join(",")}`);
-
-      if (receipt.status !== "0x1") throw new Error("LLM TX failed on-chain");
-
-      // Try extract from logs
-      let interpretation = "";
-      if (receipt.logs?.length > 0) {
-        const result = extractLLMResult(receipt);
-        if (result) { interpretation = decodeLLMResult(result); log(`Decoded: ${interpretation.slice(0, 80)}...`); }
-      }
-
-      // Try spcCalls
-      if (!interpretation && receipt.spcCalls) {
-        log("Trying spcCalls...");
-        try {
-          const sc = receipt.spcCalls;
-          if (Array.isArray(sc)) for (const c of sc) { if (c.to?.toLowerCase() === LLM_PRECOMPILE.toLowerCase() && c.output) { interpretation = decodeLLMResult(c.output); log(`spcCalls: ${interpretation.slice(0, 80)}...`); break; } }
-        } catch (e) { log(`spcCalls err: ${e}`); }
-      }
-
-      // Poll for settlement if no result yet
-      if (!interpretation) {
-        log("Polling for settlement (60s)...");
-        const sr = await pollForSettlement(llmTxHash!);
-        if (sr) {
-          if (sr.logs?.length > 0) { const r = extractLLMResult(sr); if (r) interpretation = decodeLLMResult(r); }
-          if (!interpretation && sr.spcCalls) { try { const sc = sr.spcCalls; if (Array.isArray(sc)) for (const c of sc) { if (c.to?.toLowerCase() === LLM_PRECOMPILE.toLowerCase() && c.output) { interpretation = decodeLLMResult(c.output); break; } } } catch {} }
-        }
-      }
-
-      if (!interpretation) throw new Error("No LLM result. Check RitualWallet deposit (must use deposit() function, not plain transfer).");
-
-      log("Storing result...");
-      setStatus("storing");
-      writeContract({ address: CONTRACT_ADDRESS, abi: CONTRACT_ABI, functionName: "storeResult", args: [BigInt(dreamId ?? 0), interpretation] });
-      setStatus("done"); log("Done!");
-    } catch (err: unknown) { setStatus("error"); const m = err instanceof Error ? err.message : "LLM failed"; setErrorMessage(m); log(`Error: ${m}`); }
-  };
-
-  const waitForReceipt = async (hash: string): Promise<AnyReceipt> => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const eth = (window as any).ethereum;
-    for (let i = 0; i < 30; i++) { await new Promise(r => setTimeout(r, 3000)); const r = await eth.request({ method: "eth_getTransactionReceipt", params: [hash] }); if (r) return r; }
-    throw new Error("Timeout (90s)");
-  };
-
-  const pollForSettlement = async (hash: string): Promise<AnyReceipt | null> => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const eth = (window as any).ethereum;
-    for (let i = 0; i < 12; i++) { await new Promise(r => setTimeout(r, 5000)); try { const r = await eth.request({ method: "eth_getTransactionReceipt", params: [hash] }); if (r?.logs?.length > 0) return r; } catch {} }
-    return null;
-  };
-
-  const extractLLMResult = (receipt: { logs: { topics: string[]; data: string }[] }): string | null => {
-    for (const log of receipt.logs) { if (log.data?.length > 10) { try { const d = decodeAbiParameters(parseAbiParameters("bytes, bytes"), log.data as Hex); return d[1] as string; } catch {} } }
-    return null;
-  };
-
-  const decodeLLMResult = (hex: string): string => {
-    try {
-      const d = decodeAbiParameters(parseAbiParameters("bool, bytes, bytes, string"), hex as Hex);
-      if (d[0]) throw new Error(`LLM: ${d[3]}`);
-      const c = decodeAbiParameters(parseAbiParameters("string, string, uint256, string, string, string, uint256, bytes[], bytes"), d[1] as Hex);
-      if (c[6] > 0n && c[7].length > 0) { const ch = decodeAbiParameters(parseAbiParameters("uint256, string, bytes"), c[7][0] as Hex); const m = decodeAbiParameters(parseAbiParameters("string, string, string, uint256, bytes[]"), ch[2] as Hex); return m[1] as string; }
-      return "No interpretation";
-    } catch (e) { return `Decode failed: ${e instanceof Error ? e.message : "unknown"}`; }
+      log("Step 2: Calling contract.interpretDream()...");
+      writeContract({
+        address: CONTRACT_ADDRESS,
+        abi: CONTRACT_ABI,
+        functionName: "interpretDream",
+        args: [BigInt(dreamId ?? 0), llmInput]
+      }, {
+        onSuccess: () => { log("✅ interpretDream TX sent! LLM processing on-chain..."); setStatus("storing"); },
+        onError: (error) => { setStatus("error"); setErrorMessage(`LLM: ${error.message}`); log(`Error: ${error.message}`); },
+      });
+    } catch (err: unknown) { setStatus("error"); const m = err instanceof Error ? err.message : "LLM encoding failed"; setErrorMessage(m); log(`Error: ${m}`); }
   };
 
   useEffect(() => {
-    if (isConfirmed && txHash && dreamId === null && txType === "submit") {
+    if (isConfirmed && txHash && dreamId === null) {
       (async () => {
         try {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -186,11 +146,11 @@ export default function Home() {
         } catch {}
       })();
     }
-    if (isConfirmed && txHash && txType === "deposit") {
-      log("✅ Deposit confirmed! RitualWallet balance updated.");
-      setStatus("idle");
+    if (isConfirmed && txHash && status === "storing") {
+      log("✅ LLM interpretation complete! Dream saved on-chain.");
+      setStatus("done");
     }
-  }, [isConfirmed, txHash, dreamId, txType]);
+  }, [isConfirmed, txHash, dreamId, status]);
 
   const languages = [{ code: "id", label: "🇮🇩 Indonesia" }, { code: "en", label: "🇬🇧 English" }, { code: "ja", label: "🇯🇵 Japan" }, { code: "ko", label: "🇰🇷 Korea" }, { code: "ar", label: "🇸🇦 Arabic" }, { code: "es", label: "🇪🇸 Spanish" }, { code: "pt", label: "🇧🇷 Portuguese" }, { code: "zh", label: "🇨🇳 Chinese" }];
 
@@ -220,20 +180,18 @@ export default function Home() {
 
       {isConnected && !isWrongNetwork && (
         <div className="w-full max-w-md">
-          <div className="mb-4"><button onClick={handleDeposit} disabled={status === "depositing"} className="w-full bg-gradient-to-r from-green-700 to-emerald-700 hover:from-green-600 hover:to-emerald-600 disabled:from-gray-700 disabled:text-gray-500 text-white py-2 rounded-lg text-sm font-medium">{status === "depositing" ? "⏳ Depositing..." : "💰 Deposit 0.5 RIT to RitualWallet"}</button></div>
           <div className="mb-4"><label className="block text-xs text-gray-500 mb-2 uppercase tracking-wider">Bahasa / Language</label><select value={language} onChange={(e) => setLanguage(e.target.value)} className="w-full bg-gray-800/50 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-300 focus:outline-none focus:border-purple-500">{languages.map((l) => <option key={l.code} value={l.code}>{l.label}</option>)}</select></div>
           <div className="mb-4"><label className="block text-xs text-gray-500 mb-2 uppercase tracking-wider">Ceritakan Mimpimu</label><textarea value={dreamText} onChange={(e) => setDreamText(e.target.value)} placeholder="Aku bermimpi terbang di atas kota..." rows={4} className="w-full bg-gray-800/50 border border-gray-700 rounded-lg px-4 py-3 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-purple-500 resize-none" /></div>
-          <button onClick={handleSubmit} disabled={!dreamText.trim() || ["submitting", "interpreting", "storing", "depositing"].includes(status)} className="w-full bg-gradient-to-r from-purple-600 to-blue-600 disabled:from-gray-700 disabled:text-gray-500 text-white py-3 rounded-lg font-medium shadow-lg shadow-purple-500/20 disabled:shadow-none">
+          <button onClick={handleSubmit} disabled={!dreamText.trim() || ["submitting", "interpreting", "storing"].includes(status)} className="w-full bg-gradient-to-r from-purple-600 to-blue-600 disabled:from-gray-700 disabled:text-gray-500 text-white py-3 rounded-lg font-medium shadow-lg shadow-purple-500/20 disabled:shadow-none">
             {status === "idle" && "🌙 Interpret & Save On-Chain"}
             {status === "submitting" && "📝 Submitting..."}
             {status === "interpreting" && "🤖 AI Interpreting..."}
-            {status === "storing" && "💾 Storing..."}
-            {status === "depositing" && "💰 Depositing..."}
+            {status === "storing" && "💾 Saving..."}
             {status === "done" && "✅ Dream Saved!"}
             {status === "error" && "❌ Error — Try Again"}
           </button>
           {txHash && <div className="mt-4 text-center"><a href={`https://explorer.ritualfoundation.org/tx/${txHash}`} target="_blank" rel="noopener noreferrer" className="text-xs text-purple-400">View on Explorer →</a></div>}
-          {status === "interpreting" && <div className="mt-4 text-center"><div className="inline-flex items-center gap-2 text-sm text-gray-400"><div className="w-4 h-4 border-2 border-purple-500 border-t-transparent rounded-full animate-spin" />LLM interpreting...</div></div>}
+          {status === "interpreting" && <div className="mt-4 text-center"><div className="inline-flex items-center gap-2 text-sm text-gray-400"><div className="w-4 h-4 border-2 border-purple-500 border-t-transparent rounded-full animate-spin" />LLM interpreting on-chain...</div></div>}
           {status === "error" && errorMessage && <div className="mt-4 p-3 bg-red-900/20 border border-red-800/30 rounded-lg"><p className="text-xs text-red-400 break-all">{errorMessage}</p></div>}
           {status === "done" && <div className="mt-6 p-4 bg-gradient-to-br from-purple-900/20 to-blue-900/20 border border-purple-800/30 rounded-xl"><p className="text-center text-sm text-gray-300">✨ Dream interpreted and saved!</p></div>}
           {debugLog.length > 0 && <div className="mt-4 p-2 bg-gray-900/50 rounded-lg border border-gray-800"><p className="text-xs text-gray-500 mb-1">Debug:</p>{debugLog.map((e, i) => <p key={i} className="text-xs text-gray-400 font-mono">{e}</p>)}</div>}

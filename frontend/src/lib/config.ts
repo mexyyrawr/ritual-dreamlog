@@ -27,10 +27,10 @@ export const config = createConfig({
   },
 });
 
-// Contract address (will be updated after redeploy)
-export const CONTRACT_ADDRESS = "0x714c8016Bbc3acb4769c3e26552CDEBA5B6E5CE3" as const;
+// Contract address (PrecompileConsumer architecture)
+export const CONTRACT_ADDRESS = "0x497d660e07D29DFEc59256c5894Fa754e170064e" as const;
 
-// Contract ABI (new architecture: submitDream + storeResult)
+// Contract ABI (PrecompileConsumer architecture)
 export const CONTRACT_ABI = [
   {
     name: "submitDream",
@@ -41,6 +41,16 @@ export const CONTRACT_ABI = [
       { name: "language", type: "string" },
     ],
     outputs: [{ name: "dreamId", type: "uint256" }],
+  },
+  {
+    name: "interpretDream",
+    type: "function",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "dreamId", type: "uint256" },
+      { name: "llmInput", type: "bytes" },
+    ],
+    outputs: [],
   },
   {
     name: "storeResult",
@@ -90,20 +100,6 @@ export const CONTRACT_ABI = [
     stateMutability: "view",
     inputs: [],
     outputs: [{ name: "", type: "uint256" }],
-  },
-  {
-    name: "mintDreamCard",
-    type: "function",
-    stateMutability: "nonpayable",
-    inputs: [{ name: "dreamId", type: "uint256" }],
-    outputs: [{ name: "tokenId", type: "uint256" }],
-  },
-  {
-    name: "depositForFees",
-    type: "function",
-    stateMutability: "payable",
-    inputs: [],
-    outputs: [],
   },
   {
     name: "DreamSubmitted",

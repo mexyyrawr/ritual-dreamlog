@@ -27,7 +27,7 @@ async function main() {
 
   console.log("🌙 Deploying RitualDreamlog to Ritual Testnet...");
 
-  const Dreamlog = await ethers.getContractFactory("RitualDreamlog");
+  const Dreamlog = await ethers.getContractFactory("Dreamlog");
   const dreamlog = await Dreamlog.deploy();
 
   await dreamlog.waitForDeployment();
