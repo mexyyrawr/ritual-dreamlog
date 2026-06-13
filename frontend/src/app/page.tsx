@@ -66,7 +66,7 @@ export default function Home() {
         "(string,string,string)"
       ].join("")),
       [
-        "0x0000000000000000000000000000000000000001" as `0x${string}`, // executor (non-zero placeholder)
+        "0xB42e435c4252A5a2E7440e37B609F00c61a0c91B" as `0x${string}`, // TEE executor (registered in TEEServiceRegistry)
         [],           // encryptedSecrets
         300n,         // ttl (blocks)
         [],           // secretSignatures
