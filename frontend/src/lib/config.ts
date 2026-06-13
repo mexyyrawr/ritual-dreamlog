@@ -27,27 +27,29 @@ export const config = createConfig({
   },
 });
 
-// New contract address (PrecompileConsumer + receive() auto-deposit)
-export const CONTRACT_ADDRESS = "0x4f055F663fa01FFc56cb95fD00464aCbc2E275eC" as const;
+// New contract with submitAndInterpret (1 popup!)
+export const CONTRACT_ADDRESS = "0xa7454662c5ceeB6b07d264C445e73Ab270C2583B" as const;
 
-// TEE Executor (registered LLM executor on Ritual Testnet)
 export const TEE_EXECUTOR = "0xB42e435c4252A5a2E7440e37B609F00c61a0c91B" as const;
-
-// LLM Precompile
 export const LLM_PRECOMPILE = "0x0000000000000000000000000000000000000802" as const;
-
-// RitualWallet
 export const RITUAL_WALLET = "0x532F0dF0896F353d8C3DD8cc134e8129DA2a3948" as const;
 
-// Contract ABI
 export const CONTRACT_ABI = [
   {
-    name: "submitDream",
+    name: "submitAndInterpret",
     type: "function",
     stateMutability: "nonpayable",
     inputs: [
       { name: "text", type: "string" },
+      { name: "llmInput", type: "bytes" },
     ],
+    outputs: [{ name: "dreamId", type: "uint256" }],
+  },
+  {
+    name: "submitDream",
+    type: "function",
+    stateMutability: "nonpayable",
+    inputs: [{ name: "text", type: "string" }],
     outputs: [{ name: "dreamId", type: "uint256" }],
   },
   {
