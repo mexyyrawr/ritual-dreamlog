@@ -25,6 +25,7 @@ export default function Home() {
   const [isWrongNetwork, setIsWrongNetwork] = useState(false);
   const [dreamId, setDreamId] = useState<number | null>(null);
   const [debugLog, setDebugLog] = useState<string[]>([]);
+  const [txType, setTxType] = useState<"deposit" | "submit" | null>(null);
 
   const { writeContract, data: txHash } = useWriteContract();
   const { isSuccess: isConfirmed } = useWaitForTransactionReceipt({ hash: txHash });
@@ -58,7 +59,7 @@ export default function Home() {
 
   const handleDeposit = async () => {
     if (!isConnected) return;
-    setStatus("depositing"); setErrorMessage("");
+    setStatus("depositing"); setErrorMessage(""); setTxType("deposit");
     try {
       writeContract({ address: RITUAL_WALLET, abi: [{ name: "deposit", type: "function", stateMutability: "payable", inputs: [{ name: "lockDuration", type: "uint256" }], outputs: [] }], functionName: "deposit", args: [5000n], value: BigInt("500000000000000000") });
       log("Depositing 0.5 RIT to RitualWallet...");
@@ -67,7 +68,7 @@ export default function Home() {
 
   const handleSubmit = async () => {
     if (!dreamText.trim() || !isConnected || isWrongNetwork) return;
-    setStatus("submitting"); setErrorMessage(""); setDreamId(null);
+    setStatus("submitting"); setErrorMessage(""); setDreamId(null); setTxType("submit");
     try {
       log("Step 1: Submitting dream...");
       writeContract({ address: CONTRACT_ADDRESS, abi: CONTRACT_ABI, functionName: "submitDream", args: [dreamText, language] }, {
@@ -167,7 +168,7 @@ export default function Home() {
   };
 
   useEffect(() => {
-    if (isConfirmed && txHash && dreamId === null) {
+    if (isConfirmed && txHash && dreamId === null && txType === "submit") {
       (async () => {
         try {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -177,7 +178,11 @@ export default function Home() {
         } catch {}
       })();
     }
-  }, [isConfirmed, txHash, dreamId]);
+    if (isConfirmed && txHash && txType === "deposit") {
+      log("✅ Deposit confirmed! RitualWallet balance updated.");
+      setStatus("idle");
+    }
+  }, [isConfirmed, txHash, dreamId, txType]);
 
   const languages = [{ code: "id", label: "🇮🇩 Indonesia" }, { code: "en", label: "🇬🇧 English" }, { code: "ja", label: "🇯🇵 Japan" }, { code: "ko", label: "🇰🇷 Korea" }, { code: "ar", label: "🇸🇦 Arabic" }, { code: "es", label: "🇪🇸 Spanish" }, { code: "pt", label: "🇧🇷 Portuguese" }, { code: "zh", label: "🇨🇳 Chinese" }];
 
