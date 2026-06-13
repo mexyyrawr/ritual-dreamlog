@@ -105,7 +105,8 @@ export default function Home() {
       }
 
       // Wait for receipt
-      const receipt: AnyReceipt = await waitForReceipt(llmTxHash);
+      if (!llmTxHash) throw new Error("No TX hash from LLM call");
+      const receipt: AnyReceipt = await waitForReceipt(llmTxHash!);
       log(`Status: ${receipt.status}, logs: ${receipt.logs?.length || 0}, keys: ${Object.keys(receipt).join(",")}`);
 
       if (receipt.status !== "0x1") throw new Error("LLM TX failed on-chain");
@@ -129,7 +130,7 @@ export default function Home() {
       // Poll for settlement if no result yet
       if (!interpretation) {
         log("Polling for settlement (60s)...");
-        const sr = await pollForSettlement(llmTxHash);
+        const sr = await pollForSettlement(llmTxHash!);
         if (sr) {
           if (sr.logs?.length > 0) { const r = extractLLMResult(sr); if (r) interpretation = decodeLLMResult(r); }
           if (!interpretation && sr.spcCalls) { try { const sc = sr.spcCalls; if (Array.isArray(sc)) for (const c of sc) { if (c.to?.toLowerCase() === LLM_PRECOMPILE.toLowerCase() && c.output) { interpretation = decodeLLMResult(c.output); break; } } } catch {} }
