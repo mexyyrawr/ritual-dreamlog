@@ -28,7 +28,7 @@ export const config = createConfig({
 });
 
 // Contract address (PrecompileConsumer architecture)
-export const CONTRACT_ADDRESS = "0x497d660e07D29DFEc59256c5894Fa754e170064e" as const;
+export const CONTRACT_ADDRESS = "0x483e793224535BEC4d91893e42FA70a1a81fd889" as const;
 
 // Contract ABI (PrecompileConsumer architecture)
 export const CONTRACT_ABI = [
@@ -50,6 +50,13 @@ export const CONTRACT_ABI = [
       { name: "dreamId", type: "uint256" },
       { name: "llmInput", type: "bytes" },
     ],
+    outputs: [],
+  },
+  {
+    name: "depositForFees",
+    type: "function",
+    stateMutability: "payable",
+    inputs: [],
     outputs: [],
   },
   {

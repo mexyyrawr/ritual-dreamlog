@@ -15,7 +15,7 @@ export default function Home() {
 
   const [dreamText, setDreamText] = useState("");
   const [language, setLanguage] = useState("id");
-  const [status, setStatus] = useState<"idle" | "submitting" | "interpreting" | "storing" | "done" | "error">("idle");
+  const [status, setStatus] = useState<"idle" | "submitting" | "interpreting" | "storing" | "done" | "error" | "depositing">("idle");
   const [errorMessage, setErrorMessage] = useState("");
   const [isWrongNetwork, setIsWrongNetwork] = useState(false);
   const [dreamId, setDreamId] = useState<number | null>(null);
@@ -49,6 +49,23 @@ export default function Home() {
         if (eth) await eth.request({ method: "wallet_addEthereumChain", params: [{ chainId: `0x${RITUAL_CHAIN_ID.toString(16)}`, chainName: "Ritual Testnet", nativeCurrency: { name: "RITUAL", symbol: "RITUAL", decimals: 18 }, rpcUrls: ["https://rpc.ritualfoundation.org"], blockExplorerUrls: ["https://explorer.ritualfoundation.org"] }] });
       } catch (e) { console.error("Failed to add chain:", e); }
     }
+  };
+
+  const handleDeposit = async () => {
+    if (!isConnected) return;
+    setStatus("depositing"); setErrorMessage("");
+    try {
+      log("Depositing 0.5 RIT to RitualWallet via contract...");
+      writeContract({
+        address: CONTRACT_ADDRESS,
+        abi: CONTRACT_ABI,
+        functionName: "depositForFees",
+        value: BigInt("500000000000000000") // 0.5 RIT
+      }, {
+        onSuccess: () => { log("✅ Deposit TX sent! Contract now has LLM fee balance."); setStatus("idle"); },
+        onError: (error) => { setStatus("error"); setErrorMessage(`Deposit: ${error.message}`); log(`Error: ${error.message}`); },
+      });
+    } catch (err: unknown) { setStatus("error"); setErrorMessage(err instanceof Error ? err.message : "Deposit failed"); }
   };
 
   const encodeLLMRequest = (): Hex => {
@@ -177,6 +194,7 @@ export default function Home() {
 
       {isConnected && !isWrongNetwork && (
         <div className="w-full max-w-md">
+          <div className="mb-4"><button onClick={handleDeposit} disabled={status === "depositing"} className="w-full bg-gradient-to-r from-green-700 to-emerald-700 hover:from-green-600 hover:to-emerald-600 disabled:from-gray-700 disabled:text-gray-500 text-white py-2 rounded-lg text-sm font-medium">{status === "depositing" ? "⏳ Depositing..." : "💰 Deposit 0.5 RIT for LLM Fees"}</button></div>
           <div className="mb-4"><label className="block text-xs text-gray-500 mb-2 uppercase tracking-wider">Bahasa / Language</label><select value={language} onChange={(e) => setLanguage(e.target.value)} className="w-full bg-gray-800/50 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-300 focus:outline-none focus:border-purple-500">{languages.map((l) => <option key={l.code} value={l.code}>{l.label}</option>)}</select></div>
           <div className="mb-4"><label className="block text-xs text-gray-500 mb-2 uppercase tracking-wider">Ceritakan Mimpimu</label><textarea value={dreamText} onChange={(e) => setDreamText(e.target.value)} placeholder="Aku bermimpi terbang di atas kota..." rows={4} className="w-full bg-gray-800/50 border border-gray-700 rounded-lg px-4 py-3 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-purple-500 resize-none" /></div>
           <button onClick={handleSubmit} disabled={!dreamText.trim() || ["submitting", "interpreting", "storing"].includes(status)} className="w-full bg-gradient-to-r from-purple-600 to-blue-600 disabled:from-gray-700 disabled:text-gray-500 text-white py-3 rounded-lg font-medium shadow-lg shadow-purple-500/20 disabled:shadow-none">

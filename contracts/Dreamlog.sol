@@ -6,6 +6,8 @@ import {PrecompileConsumer} from "./utils/PrecompileConsumer.sol";
 /// @title Ritual Dreamlog
 /// @notice On-chain dream journal with LLM-powered interpretation via Ritual precompile
 contract Dreamlog is PrecompileConsumer {
+    address constant RITUAL_WALLET = 0x532F0dF0896F353d8C3DD8cc134e8129DA2a3948;
+
     struct Dream {
         uint256 id;
         address dreamer;
@@ -27,6 +29,15 @@ contract Dreamlog is PrecompileConsumer {
 
     event DreamSubmitted(uint256 indexed dreamId, address indexed dreamer, string language);
     event DreamInterpreted(uint256 indexed dreamId, string mood, string archetype);
+
+    /// @notice Deposit RITUAL to RitualWallet for LLM fees
+    /// @dev Users send RIT here, contract deposits to RitualWallet with lock
+    function depositForFees() external payable {
+        (bool ok,) = RITUAL_WALLET.call{value: msg.value}(
+            abi.encodeWithSignature("deposit(uint256)", 5000)
+        );
+        require(ok, "Deposit to RitualWallet failed");
+    }
 
     /// @notice Submit a dream to the journal
     /// @param dreamText The dream description
