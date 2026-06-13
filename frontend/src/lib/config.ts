@@ -28,12 +28,12 @@ export const config = createConfig({
 });
 
 // Contract address (will be updated after redeploy)
-export const CONTRACT_ADDRESS = "0xE8e8d89868a974e38516F1ce7A909bAb19143deC" as const;
+export const CONTRACT_ADDRESS = "0x714c8016Bbc3acb4769c3e26552CDEBA5B6E5CE3" as const;
 
-// Contract ABI (matches updated Dreamlog.sol)
+// Contract ABI (new architecture: submitDream + storeResult)
 export const CONTRACT_ABI = [
   {
-    name: "submitAndInterpret",
+    name: "submitDream",
     type: "function",
     stateMutability: "nonpayable",
     inputs: [
@@ -41,6 +41,16 @@ export const CONTRACT_ABI = [
       { name: "language", type: "string" },
     ],
     outputs: [{ name: "dreamId", type: "uint256" }],
+  },
+  {
+    name: "storeResult",
+    type: "function",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "dreamId", type: "uint256" },
+      { name: "interpretation", type: "string" },
+    ],
+    outputs: [],
   },
   {
     name: "getDream",
@@ -96,15 +106,6 @@ export const CONTRACT_ABI = [
     outputs: [],
   },
   {
-    name: "DreamInterpreted",
-    type: "event",
-    inputs: [
-      { name: "dreamId", type: "uint256", indexed: true },
-      { name: "mood", type: "string", indexed: false },
-      { name: "archetype", type: "string", indexed: false },
-    ],
-  },
-  {
     name: "DreamSubmitted",
     type: "event",
     inputs: [
@@ -114,10 +115,12 @@ export const CONTRACT_ABI = [
     ],
   },
   {
-    name: "DebugLLM",
+    name: "DreamInterpreted",
     type: "event",
     inputs: [
-      { name: "message", type: "string", indexed: false },
+      { name: "dreamId", type: "uint256", indexed: true },
+      { name: "mood", type: "string", indexed: false },
+      { name: "archetype", type: "string", indexed: false },
     ],
   },
 ] as const;
