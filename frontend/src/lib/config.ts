@@ -28,7 +28,7 @@ export const config = createConfig({
 });
 
 // Contract address (PrecompileConsumer architecture)
-export const CONTRACT_ADDRESS = "0x7ea7439e94260927383D06426B3262d5498B32a4" as const;
+export const CONTRACT_ADDRESS = "0xb1fB621c97e39235A06B660731C9EC409232e9BA" as const;
 
 // Contract ABI (PrecompileConsumer architecture)
 export const CONTRACT_ABI = [

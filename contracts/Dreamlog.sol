@@ -28,9 +28,8 @@ contract Dreamlog is PrecompileConsumer {
 
     /// @notice Deposit RITUAL to RitualWallet for LLM fees
     function depositForFees() external payable {
-        (bool ok,) = RITUAL_WALLET.call{value: msg.value}(
-            abi.encodeWithSignature("deposit(uint256)", 100000)
-        );
+        // Call deposit() on RitualWallet (no lock duration parameter)
+        (bool ok,) = RITUAL_WALLET.call{value: msg.value}(abi.encodeWithSignature("deposit()"));
         require(ok, "Deposit to RitualWallet failed");
     }
 
@@ -58,12 +57,10 @@ contract Dreamlog is PrecompileConsumer {
         require(dreams[dreamId].dreamer == msg.sender, "not your dream");
         require(!dreams[dreamId].interpreted, "already interpreted");
 
-        // Deposit to RitualWallet first if value is sent
+        // Deposit to RitualWallet if value is sent
         if (msg.value > 0) {
-            (bool depositOk,) = RITUAL_WALLET.call{value: msg.value}(
-                abi.encodeWithSignature("deposit(uint256)", 100000)
-            );
-            require(depositOk, "Deposit to RitualWallet failed");
+            (bool ok,) = RITUAL_WALLET.call{value: msg.value}(abi.encodeWithSignature("deposit()"));
+            require(ok, "Deposit failed");
         }
 
         bytes memory output = _executePrecompile(LLM_INFERENCE_PRECOMPILE, llmInput);
@@ -80,7 +77,6 @@ contract Dreamlog is PrecompileConsumer {
         emit DreamInterpreted(dreamId, "mystical", "unknown");
     }
 
-    /// @notice Store interpretation result
     function storeResult(uint256 dreamId, string calldata interpretation) external {
         require(dreams[dreamId].dreamer == msg.sender, "not your dream");
         dreams[dreamId].interpretation = interpretation;
