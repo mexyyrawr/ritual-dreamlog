@@ -160,9 +160,36 @@ export default function Home() {
         } catch {}
       })();
     }
+    // When interpretDream TX is confirmed, poll for LLM result
     if (isConfirmed && txHash && status === "storing") {
-      log("✅ LLM interpretation complete! Dream saved on-chain.");
-      setStatus("done");
+      log("TX confirmed! Waiting for LLM settlement (polling spcCalls)...");
+      let pollCount = 0;
+      const pollInterval = setInterval(async () => {
+        pollCount++;
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const eth = (window as any).ethereum;
+          const r = await eth.request({ method: "eth_getTransactionReceipt", params: [txHash] });
+          if (r?.spcCalls && r.spcCalls.length > 0) {
+            log(`spcCalls found! (${r.spcCalls.length} entries)`);
+            // Try to extract LLM result from spcCalls
+            for (const call of r.spcCalls) {
+              if (call.output && call.output.length > 10) {
+                log(`LLM result found (${call.output.length} bytes)`);
+                clearInterval(pollInterval);
+                log("✅ LLM interpretation complete! Dream saved on-chain.");
+                setStatus("done");
+                return;
+              }
+            }
+          }
+          if (pollCount >= 30) { // 30 polls × 3s = 90s timeout
+            clearInterval(pollInterval);
+            log("⚠️ Timeout waiting for LLM result. Check explorer for settlement.");
+            setStatus("done"); // Show as done even if we can't extract result
+          }
+        } catch {}
+      }, 3000);
     }
   }, [isConfirmed, txHash, dreamId, status]);
 
