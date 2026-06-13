@@ -56,10 +56,7 @@ export default function Home() {
     const msg = JSON.stringify([{ role: "system", content: sys }, { role: "user", content: dreamText }]);
 
     // Encode the 25-field LLM request
-    // Field order: executor, encryptedSecrets, ttl, secretSignatures, userPublicKey,
-    //   messagesJson, model, frequencyPenalty, logitBias, logprobs, maxCompletionTokens,
-    //   n, parallelToolCalls, presencePenalty, responseFormat, seed, serviceTier, stop,
-    //   stream, temperature, toolChoice, tools, topLogprobs, topP, convoHistory
+    // Field 0: executor (must be non-zero, from TEEServiceRegistry)
     const encoded = encodeAbiParameters(
       parseAbiParameters([
         "address, bytes[], uint256, bytes[], bytes,",
@@ -69,7 +66,7 @@ export default function Home() {
         "(string,string,string)"
       ].join("")),
       [
-        "0x0000000000000000000000000000000000000000" as `0x${string}`, // executor (will be set by contract)
+        "0x0000000000000000000000000000000000000001" as `0x${string}`, // executor (non-zero placeholder)
         [],           // encryptedSecrets
         300n,         // ttl (blocks)
         [],           // secretSignatures
