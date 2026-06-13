@@ -1,0 +1,19 @@
+{
+  "intent": "build",
+  "idea": "Ritual Dreamlog — On-chain dream journal. User writes a dream in any language, LLM precompile (0x0802) interprets it on-chain, results stored immutably (symbols, emotion, archetype, interpretation, mood). Visual card generated off-chain (CSS→screenshot). Share to X. Optionally mint as NFT.",
+  "current_phase": 0,
+  "phases": [],
+  "files_read": [],
+  "next_file": "agents/ritual-dapp-builder.md",
+  "markers": {
+    "chain_connection": false,
+    "wallet_funded": false,
+    "contract_compiled": false,
+    "contract_deployed": false,
+    "precompile_simulated": false,
+    "precompile_settled": false,
+    "frontend_renders": false,
+    "frontend_connects": false,
+    "e2e_complete": false
+  }
+}
