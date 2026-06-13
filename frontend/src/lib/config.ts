@@ -27,10 +27,10 @@ export const config = createConfig({
   },
 });
 
-// Contract address (EOA direct call architecture)
+// Contract address (PrecompileConsumer architecture)
 export const CONTRACT_ADDRESS = "0xb1fB621c97e39235A06B660731C9EC409232e9BA" as const;
 
-// Contract ABI (simple storage only - LLM calls go direct from EOA)
+// Contract ABI
 export const CONTRACT_ABI = [
   {
     name: "submitDream",
@@ -41,6 +41,16 @@ export const CONTRACT_ABI = [
       { name: "language", type: "string" },
     ],
     outputs: [{ name: "dreamId", type: "uint256" }],
+  },
+  {
+    name: "interpretDream",
+    type: "function",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "dreamId", type: "uint256" },
+      { name: "llmInput", type: "bytes" },
+    ],
+    outputs: [],
   },
   {
     name: "storeResult",
